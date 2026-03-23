@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-03-23
+
+### Added
+- Task list now supports drag-and-drop reordering.
+- Added section-level quick add (`＋`) to insert a new task in the same group.
+- Added `写入/更新任务` action to write task list back into `data start/end` scope.
+
+### Improved
+- Added date conflict guard: when start date is later than due date, row highlights and shows `日期冲突`.
+
 ## [0.1.4] - 2026-03-23
 
 ### Fixed

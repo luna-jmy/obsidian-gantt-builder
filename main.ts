@@ -21,6 +21,7 @@ import {
   parseTasksFromNote,
   toMermaidBlock,
   upsertGanttArtifacts,
+  upsertTaskScope,
 } from "./utils/ganttHelper";
 
 const VIEW_TYPE_GANTT_BUILDER = "gantt-builder-view";
@@ -41,14 +42,14 @@ const DEFAULT_SETTINGS: GanttBuilderSettings = {
   excludeWeekends: true,
   openMode: "modal",
   insertMode: "bottom",
-  targetHeading: "Gantt Chart",
+  targetHeading: "项目分解",
 };
 
-const createEmptyTask = (): Task => ({
+const createEmptyTask = (section = ""): Task => ({
   internalId: crypto.randomUUID(),
   name: "",
   project: "Current Note",
-  section: "",
+  section,
   completed: false,
   startDate: "",
   dueDate: "",
@@ -73,6 +74,7 @@ class GanttBuilderEditor {
   private chartTitle = DEFAULT_CHART_TITLE;
   private insertMode: InsertMode;
   private targetHeading: string;
+  private draggingTaskId: string | null = null;
 
   private readonly tableWrapEl: HTMLDivElement;
   private readonly previewPaneEl: HTMLDivElement;
@@ -184,13 +186,18 @@ class GanttBuilderEditor {
       await this.exportPng();
     };
 
-    const saveButton = topButtonsEl.createEl("button", { text: "写入/更新甘特图", cls: "mod-cta" });
-    saveButton.onclick = async () => {
-      await this.saveArtifactsToNote();
+    const saveTasksButton = topButtonsEl.createEl("button", { text: "写入/更新任务" });
+    saveTasksButton.onclick = async () => {
+      await this.saveTasksToNote();
+    };
+
+    const saveGanttButton = topButtonsEl.createEl("button", { text: "写入/更新甘特图", cls: "mod-cta" });
+    saveGanttButton.onclick = async () => {
+      await this.saveGanttToNote();
     };
 
     const taskHeaderEl = this.rootEl.createDiv("gantt-builder-task-header");
-    taskHeaderEl.createEl("h3", { text: "任务列表" });
+    taskHeaderEl.createEl("h3", { text: "任务列表（支持拖拽排序）" });
     const addTaskButton = taskHeaderEl.createEl("button", { text: "新增任务", cls: "mod-cta" });
     addTaskButton.onclick = async () => {
       this.tasks.push(createEmptyTask());
@@ -249,6 +256,13 @@ class GanttBuilderEditor {
     return this.insertMode === "heading" ? DEFAULT_CHART_TITLE : this.chartTitle;
   }
 
+  private hasDateConflict(task: Task): boolean {
+    if (!task.startDate || !task.dueDate) {
+      return false;
+    }
+    return new Date(task.startDate) > new Date(task.dueDate);
+  }
+
   private async reloadTasks(): Promise<void> {
     const content = await this.app.vault.read(this.file);
     const persisted = loadPersistedGanttData(content);
@@ -283,27 +297,70 @@ class GanttBuilderEditor {
     return options;
   }
 
+  private moveTask(sourceId: string, targetId: string): void {
+    if (sourceId === targetId) {
+      return;
+    }
+    const sourceIndex = this.tasks.findIndex((item) => item.internalId === sourceId);
+    const targetIndex = this.tasks.findIndex((item) => item.internalId === targetId);
+    if (sourceIndex === -1 || targetIndex === -1) {
+      return;
+    }
+    const [moved] = this.tasks.splice(sourceIndex, 1);
+    this.tasks.splice(targetIndex, 0, moved);
+  }
+
   private renderTaskTable(): void {
     this.tableWrapEl.empty();
     const table = this.tableWrapEl.createEl("table", { cls: "gantt-builder-table" });
     const head = table.createTHead();
     const headerRow = head.insertRow();
-    ["分组", "状态", "任务", "开始", "截止", "ID", "依赖", "操作"].forEach((title) => {
-      headerRow.createEl("th", { text: title });
-    });
+    ["分组", "状态", "任务", "开始", "截止", "ID", "依赖", "操作"].forEach((title) => headerRow.createEl("th", { text: title }));
 
     const body = table.createTBody();
     for (const task of this.tasks) {
       const row = body.insertRow();
+      row.draggable = true;
+      row.dataset.taskId = task.internalId;
 
-      this.bindTextInputCell(row, task.section, "如：执行阶段", async (value) => {
-        task.section = value;
+      row.addEventListener("dragstart", (event) => {
+        this.draggingTaskId = task.internalId;
+        event.dataTransfer?.setData("text/plain", task.internalId);
+      });
+      row.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        row.classList.add("gantt-builder-row-drop");
+      });
+      row.addEventListener("dragleave", () => row.classList.remove("gantt-builder-row-drop"));
+      row.addEventListener("drop", async () => {
+        row.classList.remove("gantt-builder-row-drop");
+        if (!this.draggingTaskId) {
+          return;
+        }
+        this.moveTask(this.draggingTaskId, task.internalId);
+        this.draggingTaskId = null;
+        this.renderTaskTable();
         await this.refreshPreview();
       });
 
+      const sectionCell = row.insertCell();
+      sectionCell.addClass("gantt-builder-section-cell");
+      const sectionInput = sectionCell.createEl("input", { type: "text", value: task.section, placeholder: "如：执行阶段" });
+      sectionInput.onchange = async () => {
+        task.section = sectionInput.value.trim();
+        await this.refreshPreview();
+      };
+      const addInSectionButton = sectionCell.createEl("button", { text: "＋", attr: { title: "在当前分组新增任务" } });
+      addInSectionButton.onclick = async () => {
+        const insertIndex = this.tasks.findIndex((item) => item.internalId === task.internalId);
+        const newTask = createEmptyTask(task.section);
+        this.tasks.splice(insertIndex + 1, 0, newTask);
+        this.renderTaskTable();
+        await this.refreshPreview();
+      };
+
       const statusCell = row.insertCell();
       statusCell.addClass("gantt-builder-status");
-
       const doneLabel = statusCell.createEl("label");
       const doneToggle = doneLabel.createEl("input", { attr: { type: "checkbox" } });
       doneToggle.checked = task.completed;
@@ -338,13 +395,23 @@ class GanttBuilderEditor {
 
       this.bindDateInputCell(row, task.startDate, async (value) => {
         task.startDate = value;
+        this.renderTaskTable();
         await this.refreshPreview();
       });
 
-      this.bindDateInputCell(row, task.dueDate, async (value) => {
-        task.dueDate = value;
+      const dueCell = row.insertCell();
+      const dueInput = dueCell.createEl("input", { type: "date", value: task.dueDate });
+      dueInput.onchange = async () => {
+        task.dueDate = dueInput.value.trim();
+        this.renderTaskTable();
         await this.refreshPreview();
-      });
+      };
+
+      if (this.hasDateConflict(task)) {
+        row.classList.add("gantt-builder-row-conflict");
+        const warning = dueCell.createDiv("gantt-builder-date-conflict");
+        warning.setText("日期冲突");
+      }
 
       const idCell = row.insertCell();
       idCell.addClass("gantt-builder-id-cell");
@@ -412,18 +479,15 @@ class GanttBuilderEditor {
     if (!markdownView?.file || markdownView.file.path !== this.file.path) {
       return undefined;
     }
-
     const editor = markdownView.editor as {
       getCursor: () => { line: number; ch: number };
       getValue: () => string;
       posToOffset?: (pos: { line: number; ch: number }) => number;
     };
-
     const cursor = editor.getCursor();
     if (typeof editor.posToOffset === "function") {
       return editor.posToOffset(cursor);
     }
-
     const lines = editor.getValue().split("\n");
     let offset = 0;
     for (let line = 0; line < cursor.line; line++) {
@@ -438,7 +502,7 @@ class GanttBuilderEditor {
 
   private async saveBinaryToVault(filename: string, bytes: Uint8Array): Promise<string> {
     const attachmentFolder = ((this.app.vault as unknown as { getConfig?: (key: string) => string }).getConfig?.("attachmentFolderPath")) || "";
-    const normalizedFolder = attachmentFolder?.trim();
+    const normalizedFolder = attachmentFolder.trim();
     const path = normalizedFolder ? `${normalizedFolder}/${filename}` : filename;
     await this.app.vault.createBinary(path, bytes);
     return path;
@@ -450,11 +514,9 @@ class GanttBuilderEditor {
       new Notice("未找到可导出的甘特图，请先点击预览。");
       return;
     }
-
     const cloned = svgElement.cloneNode(true) as SVGSVGElement;
     cloned.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    const raw = new XMLSerializer().serializeToString(cloned);
-    const content = `<?xml version="1.0" encoding="UTF-8"?>\n${raw}`;
+    const content = `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(cloned)}`;
     const bytes = new TextEncoder().encode(content);
     const savedPath = await this.saveBinaryToVault(`${this.file.basename}-gantt-${Date.now()}.svg`, bytes);
     new Notice(`SVG 已导出：${savedPath}`);
@@ -469,7 +531,6 @@ class GanttBuilderEditor {
 
     const cloned = svgElement.cloneNode(true) as SVGSVGElement;
     cloned.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-
     const viewBox = cloned.getAttribute("viewBox");
     let width = 1200;
     let height = 600;
@@ -482,14 +543,14 @@ class GanttBuilderEditor {
     }
 
     const svgRaw = new XMLSerializer().serializeToString(cloned);
-    const svgBlob = new Blob([svgRaw], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(svgBlob);
+    const blob = new Blob([svgRaw], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
 
     try {
       const image = await new Promise<HTMLImageElement>((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error("无法加载 SVG 用于 PNG 导出"));
+        img.onerror = () => reject(new Error("无法加载 SVG 导出 PNG"));
         img.src = url;
       });
 
@@ -498,9 +559,8 @@ class GanttBuilderEditor {
       canvas.height = height * 2;
       const ctx = canvas.getContext("2d");
       if (!ctx) {
-        throw new Error("无法创建 Canvas 上下文");
+        throw new Error("无法创建 Canvas");
       }
-
       ctx.scale(2, 2);
       ctx.drawImage(image, 0, 0, width, height);
 
@@ -511,6 +571,7 @@ class GanttBuilderEditor {
       for (let i = 0; i < binary.length; i++) {
         bytes[i] = binary.charCodeAt(i);
       }
+
       const savedPath = await this.saveBinaryToVault(`${this.file.basename}-gantt-${Date.now()}.png`, bytes);
       new Notice(`PNG 已导出：${savedPath}`);
     } finally {
@@ -525,24 +586,30 @@ class GanttBuilderEditor {
     await MarkdownRenderer.render(this.app, `${toMermaidBlock(mermaidCode)}\n`, this.previewPaneEl, this.file.path, this.previewComponent);
   }
 
-  private async saveArtifactsToNote(): Promise<void> {
-    const current = await this.app.vault.read(this.file);
+  private async saveTasksToNote(): Promise<void> {
+    const content = await this.app.vault.read(this.file);
+    const next = upsertTaskScope(content, this.tasks);
+    await this.app.vault.modify(this.file, next);
+    new Notice("任务已写入/更新到 data 范围。");
+  }
+
+  private async saveGanttToNote(): Promise<void> {
+    const content = await this.app.vault.read(this.file);
     const effectiveTitle = this.getEffectiveChartTitle();
     const mermaidCode = generateMermaidCode(this.tasks, this.config, effectiveTitle);
     const cursorOffset = this.getCursorOffsetForCurrentFile();
     const mode = this.insertMode === "cursor" && cursorOffset === undefined ? "bottom" : this.insertMode;
     if (this.insertMode === "cursor" && cursorOffset === undefined) {
-      new Notice("未找到当前笔记光标位置，已回退到底部写入。");
+      new Notice("未找到光标位置，已回退到底部写入。");
     }
-
-    const next = upsertGanttArtifacts(current, mermaidCode, this.tasks, effectiveTitle, {
+    const next = upsertGanttArtifacts(content, mermaidCode, this.tasks, effectiveTitle, {
       mode,
       headingText: this.targetHeading,
       cursorOffset,
       useCustomTitle: this.insertMode !== "heading",
     });
     await this.app.vault.modify(this.file, next);
-    new Notice("甘特图已写入笔记。");
+    new Notice("甘特图已写入/更新。");
   }
 }
 

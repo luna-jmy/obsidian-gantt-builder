@@ -405,6 +405,64 @@ ${noteContent.slice(offset)}`.trimEnd() + "\n";
 ${ganttBlock}
 `.trimStart();
 }
+function serializeTasksToMarkdown(tasks) {
+  const lines = [];
+  let lastSection = "__none__";
+  for (const task of tasks) {
+    const section = (task.section || "").trim();
+    if (section !== lastSection) {
+      if (section) {
+        if (lines.length) {
+          lines.push("");
+        }
+        lines.push(`### ${section}`);
+      }
+      lastSection = section;
+    }
+    const parts = [`- [${task.completed ? "x" : " "}]`, task.name || "Untitled Task"];
+    if (task.startDate) {
+      parts.push(`\u{1F6EB} ${task.startDate}`);
+    }
+    if (task.dueDate) {
+      parts.push(`\u{1F4C5} ${task.dueDate}`);
+    }
+    if (task.id) {
+      parts.push(`\u{1F194} ${task.id}`);
+    }
+    if (task.dependency) {
+      parts.push(`\u26D4 ${task.dependency}`);
+    }
+    if (task.isHighPriority) {
+      parts.push("\u{1F53A}");
+    }
+    if (task.isMilestone) {
+      parts.push("#milestone");
+    }
+    lines.push(parts.join(" "));
+  }
+  return lines.join("\n").trim();
+}
+function upsertTaskScope(noteContent, tasks) {
+  const taskBody = serializeTasksToMarkdown(tasks);
+  const block = `${DATA_START_MARKER}
+${taskBody}
+${DATA_END_MARKER}`;
+  const startIndex = noteContent.indexOf(DATA_START_MARKER);
+  const endIndex = noteContent.indexOf(DATA_END_MARKER);
+  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+    const before = noteContent.slice(0, startIndex).replace(/\s+$/, "");
+    const after = noteContent.slice(endIndex + DATA_END_MARKER.length).replace(/^\s+/, "");
+    return `${before}
+
+${block}
+
+${after}`.trimEnd() + "\n";
+  }
+  return `${noteContent.replace(/\s*$/, "")}
+
+${block}
+`.trimStart();
+}
 
 // main.ts
 var VIEW_TYPE_GANTT_BUILDER = "gantt-builder-view";
@@ -412,13 +470,13 @@ var DEFAULT_SETTINGS = {
   excludeWeekends: true,
   openMode: "modal",
   insertMode: "bottom",
-  targetHeading: "Gantt Chart"
+  targetHeading: "\u9879\u76EE\u5206\u89E3"
 };
-var createEmptyTask = () => ({
+var createEmptyTask = (section = "") => ({
   internalId: crypto.randomUUID(),
   name: "",
   project: "Current Note",
-  section: "",
+  section,
   completed: false,
   startDate: "",
   dueDate: "",
@@ -432,6 +490,7 @@ var GanttBuilderEditor = class {
   constructor(app, file, rootEl, settings, onSettingsChange) {
     this.tasks = [];
     this.chartTitle = DEFAULT_CHART_TITLE;
+    this.draggingTaskId = null;
     this.app = app;
     this.file = file;
     this.rootEl = rootEl;
@@ -504,12 +563,16 @@ var GanttBuilderEditor = class {
     exportPngButton.onclick = async () => {
       await this.exportPng();
     };
-    const saveButton = topButtonsEl.createEl("button", { text: "\u5199\u5165/\u66F4\u65B0\u7518\u7279\u56FE", cls: "mod-cta" });
-    saveButton.onclick = async () => {
-      await this.saveArtifactsToNote();
+    const saveTasksButton = topButtonsEl.createEl("button", { text: "\u5199\u5165/\u66F4\u65B0\u4EFB\u52A1" });
+    saveTasksButton.onclick = async () => {
+      await this.saveTasksToNote();
+    };
+    const saveGanttButton = topButtonsEl.createEl("button", { text: "\u5199\u5165/\u66F4\u65B0\u7518\u7279\u56FE", cls: "mod-cta" });
+    saveGanttButton.onclick = async () => {
+      await this.saveGanttToNote();
     };
     const taskHeaderEl = this.rootEl.createDiv("gantt-builder-task-header");
-    taskHeaderEl.createEl("h3", { text: "\u4EFB\u52A1\u5217\u8868" });
+    taskHeaderEl.createEl("h3", { text: "\u4EFB\u52A1\u5217\u8868\uFF08\u652F\u6301\u62D6\u62FD\u6392\u5E8F\uFF09" });
     const addTaskButton = taskHeaderEl.createEl("button", { text: "\u65B0\u589E\u4EFB\u52A1", cls: "mod-cta" });
     addTaskButton.onclick = async () => {
       this.tasks.push(createEmptyTask());
@@ -557,6 +620,12 @@ var GanttBuilderEditor = class {
   getEffectiveChartTitle() {
     return this.insertMode === "heading" ? DEFAULT_CHART_TITLE : this.chartTitle;
   }
+  hasDateConflict(task) {
+    if (!task.startDate || !task.dueDate) {
+      return false;
+    }
+    return new Date(task.startDate) > new Date(task.dueDate);
+  }
   async reloadTasks() {
     const content = await this.app.vault.read(this.file);
     const persisted = loadPersistedGanttData(content);
@@ -583,21 +652,63 @@ var GanttBuilderEditor = class {
     }
     return options;
   }
+  moveTask(sourceId, targetId) {
+    if (sourceId === targetId) {
+      return;
+    }
+    const sourceIndex = this.tasks.findIndex((item) => item.internalId === sourceId);
+    const targetIndex = this.tasks.findIndex((item) => item.internalId === targetId);
+    if (sourceIndex === -1 || targetIndex === -1) {
+      return;
+    }
+    const [moved] = this.tasks.splice(sourceIndex, 1);
+    this.tasks.splice(targetIndex, 0, moved);
+  }
   renderTaskTable() {
     this.tableWrapEl.empty();
     const table = this.tableWrapEl.createEl("table", { cls: "gantt-builder-table" });
     const head = table.createTHead();
     const headerRow = head.insertRow();
-    ["\u5206\u7EC4", "\u72B6\u6001", "\u4EFB\u52A1", "\u5F00\u59CB", "\u622A\u6B62", "ID", "\u4F9D\u8D56", "\u64CD\u4F5C"].forEach((title) => {
-      headerRow.createEl("th", { text: title });
-    });
+    ["\u5206\u7EC4", "\u72B6\u6001", "\u4EFB\u52A1", "\u5F00\u59CB", "\u622A\u6B62", "ID", "\u4F9D\u8D56", "\u64CD\u4F5C"].forEach((title) => headerRow.createEl("th", { text: title }));
     const body = table.createTBody();
     for (const task of this.tasks) {
       const row = body.insertRow();
-      this.bindTextInputCell(row, task.section, "\u5982\uFF1A\u6267\u884C\u9636\u6BB5", async (value) => {
-        task.section = value;
+      row.draggable = true;
+      row.dataset.taskId = task.internalId;
+      row.addEventListener("dragstart", (event) => {
+        this.draggingTaskId = task.internalId;
+        event.dataTransfer?.setData("text/plain", task.internalId);
+      });
+      row.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        row.classList.add("gantt-builder-row-drop");
+      });
+      row.addEventListener("dragleave", () => row.classList.remove("gantt-builder-row-drop"));
+      row.addEventListener("drop", async () => {
+        row.classList.remove("gantt-builder-row-drop");
+        if (!this.draggingTaskId) {
+          return;
+        }
+        this.moveTask(this.draggingTaskId, task.internalId);
+        this.draggingTaskId = null;
+        this.renderTaskTable();
         await this.refreshPreview();
       });
+      const sectionCell = row.insertCell();
+      sectionCell.addClass("gantt-builder-section-cell");
+      const sectionInput = sectionCell.createEl("input", { type: "text", value: task.section, placeholder: "\u5982\uFF1A\u6267\u884C\u9636\u6BB5" });
+      sectionInput.onchange = async () => {
+        task.section = sectionInput.value.trim();
+        await this.refreshPreview();
+      };
+      const addInSectionButton = sectionCell.createEl("button", { text: "\uFF0B", attr: { title: "\u5728\u5F53\u524D\u5206\u7EC4\u65B0\u589E\u4EFB\u52A1" } });
+      addInSectionButton.onclick = async () => {
+        const insertIndex = this.tasks.findIndex((item) => item.internalId === task.internalId);
+        const newTask = createEmptyTask(task.section);
+        this.tasks.splice(insertIndex + 1, 0, newTask);
+        this.renderTaskTable();
+        await this.refreshPreview();
+      };
       const statusCell = row.insertCell();
       statusCell.addClass("gantt-builder-status");
       const doneLabel = statusCell.createEl("label");
@@ -630,12 +741,21 @@ var GanttBuilderEditor = class {
       });
       this.bindDateInputCell(row, task.startDate, async (value) => {
         task.startDate = value;
+        this.renderTaskTable();
         await this.refreshPreview();
       });
-      this.bindDateInputCell(row, task.dueDate, async (value) => {
-        task.dueDate = value;
+      const dueCell = row.insertCell();
+      const dueInput = dueCell.createEl("input", { type: "date", value: task.dueDate });
+      dueInput.onchange = async () => {
+        task.dueDate = dueInput.value.trim();
+        this.renderTaskTable();
         await this.refreshPreview();
-      });
+      };
+      if (this.hasDateConflict(task)) {
+        row.classList.add("gantt-builder-row-conflict");
+        const warning = dueCell.createDiv("gantt-builder-date-conflict");
+        warning.setText("\u65E5\u671F\u51B2\u7A81");
+      }
       const idCell = row.insertCell();
       idCell.addClass("gantt-builder-id-cell");
       const idInput = idCell.createEl("input", { type: "text", value: task.id, placeholder: "\u53EF\u9009" });
@@ -709,7 +829,7 @@ var GanttBuilderEditor = class {
   }
   async saveBinaryToVault(filename, bytes) {
     const attachmentFolder = this.app.vault.getConfig?.("attachmentFolderPath") || "";
-    const normalizedFolder = attachmentFolder?.trim();
+    const normalizedFolder = attachmentFolder.trim();
     const path = normalizedFolder ? `${normalizedFolder}/${filename}` : filename;
     await this.app.vault.createBinary(path, bytes);
     return path;
@@ -722,9 +842,8 @@ var GanttBuilderEditor = class {
     }
     const cloned = svgElement.cloneNode(true);
     cloned.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    const raw = new XMLSerializer().serializeToString(cloned);
     const content = `<?xml version="1.0" encoding="UTF-8"?>
-${raw}`;
+${new XMLSerializer().serializeToString(cloned)}`;
     const bytes = new TextEncoder().encode(content);
     const savedPath = await this.saveBinaryToVault(`${this.file.basename}-gantt-${Date.now()}.svg`, bytes);
     new import_obsidian.Notice(`SVG \u5DF2\u5BFC\u51FA\uFF1A${savedPath}`);
@@ -748,13 +867,13 @@ ${raw}`;
       }
     }
     const svgRaw = new XMLSerializer().serializeToString(cloned);
-    const svgBlob = new Blob([svgRaw], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(svgBlob);
+    const blob = new Blob([svgRaw], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
     try {
       const image = await new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error("\u65E0\u6CD5\u52A0\u8F7D SVG \u7528\u4E8E PNG \u5BFC\u51FA"));
+        img.onerror = () => reject(new Error("\u65E0\u6CD5\u52A0\u8F7D SVG \u5BFC\u51FA PNG"));
         img.src = url;
       });
       const canvas = document.createElement("canvas");
@@ -762,7 +881,7 @@ ${raw}`;
       canvas.height = height * 2;
       const ctx = canvas.getContext("2d");
       if (!ctx) {
-        throw new Error("\u65E0\u6CD5\u521B\u5EFA Canvas \u4E0A\u4E0B\u6587");
+        throw new Error("\u65E0\u6CD5\u521B\u5EFA Canvas");
       }
       ctx.scale(2, 2);
       ctx.drawImage(image, 0, 0, width, height);
@@ -786,23 +905,29 @@ ${raw}`;
     await import_obsidian.MarkdownRenderer.render(this.app, `${toMermaidBlock(mermaidCode)}
 `, this.previewPaneEl, this.file.path, this.previewComponent);
   }
-  async saveArtifactsToNote() {
-    const current = await this.app.vault.read(this.file);
+  async saveTasksToNote() {
+    const content = await this.app.vault.read(this.file);
+    const next = upsertTaskScope(content, this.tasks);
+    await this.app.vault.modify(this.file, next);
+    new import_obsidian.Notice("\u4EFB\u52A1\u5DF2\u5199\u5165/\u66F4\u65B0\u5230 data \u8303\u56F4\u3002");
+  }
+  async saveGanttToNote() {
+    const content = await this.app.vault.read(this.file);
     const effectiveTitle = this.getEffectiveChartTitle();
     const mermaidCode = generateMermaidCode(this.tasks, this.config, effectiveTitle);
     const cursorOffset = this.getCursorOffsetForCurrentFile();
     const mode = this.insertMode === "cursor" && cursorOffset === void 0 ? "bottom" : this.insertMode;
     if (this.insertMode === "cursor" && cursorOffset === void 0) {
-      new import_obsidian.Notice("\u672A\u627E\u5230\u5F53\u524D\u7B14\u8BB0\u5149\u6807\u4F4D\u7F6E\uFF0C\u5DF2\u56DE\u9000\u5230\u5E95\u90E8\u5199\u5165\u3002");
+      new import_obsidian.Notice("\u672A\u627E\u5230\u5149\u6807\u4F4D\u7F6E\uFF0C\u5DF2\u56DE\u9000\u5230\u5E95\u90E8\u5199\u5165\u3002");
     }
-    const next = upsertGanttArtifacts(current, mermaidCode, this.tasks, effectiveTitle, {
+    const next = upsertGanttArtifacts(content, mermaidCode, this.tasks, effectiveTitle, {
       mode,
       headingText: this.targetHeading,
       cursorOffset,
       useCustomTitle: this.insertMode !== "heading"
     });
     await this.app.vault.modify(this.file, next);
-    new import_obsidian.Notice("\u7518\u7279\u56FE\u5DF2\u5199\u5165\u7B14\u8BB0\u3002");
+    new import_obsidian.Notice("\u7518\u7279\u56FE\u5DF2\u5199\u5165/\u66F4\u65B0\u3002");
   }
 };
 var GanttBuilderModal = class extends import_obsidian.Modal {

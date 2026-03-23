@@ -450,3 +450,60 @@ export function upsertGanttArtifacts(
 
   return `${noteContent.replace(/\s*$/, "")}\n\n${ganttBlock}\n`.trimStart();
 }
+
+export function serializeTasksToMarkdown(tasks: Task[]): string {
+  const lines: string[] = [];
+  let lastSection = "__none__";
+
+  for (const task of tasks) {
+    const section = (task.section || "").trim();
+    if (section !== lastSection) {
+      if (section) {
+        if (lines.length) {
+          lines.push("");
+        }
+        lines.push(`### ${section}`);
+      }
+      lastSection = section;
+    }
+
+    const parts: string[] = [`- [${task.completed ? "x" : " "}]`, task.name || "Untitled Task"];
+    if (task.startDate) {
+      parts.push(`🛫 ${task.startDate}`);
+    }
+    if (task.dueDate) {
+      parts.push(`📅 ${task.dueDate}`);
+    }
+    if (task.id) {
+      parts.push(`🆔 ${task.id}`);
+    }
+    if (task.dependency) {
+      parts.push(`⛔ ${task.dependency}`);
+    }
+    if (task.isHighPriority) {
+      parts.push("🔺");
+    }
+    if (task.isMilestone) {
+      parts.push("#milestone");
+    }
+
+    lines.push(parts.join(" "));
+  }
+
+  return lines.join("\n").trim();
+}
+
+export function upsertTaskScope(noteContent: string, tasks: Task[]): string {
+  const taskBody = serializeTasksToMarkdown(tasks);
+  const block = `${DATA_START_MARKER}\n${taskBody}\n${DATA_END_MARKER}`;
+
+  const startIndex = noteContent.indexOf(DATA_START_MARKER);
+  const endIndex = noteContent.indexOf(DATA_END_MARKER);
+  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+    const before = noteContent.slice(0, startIndex).replace(/\s+$/, "");
+    const after = noteContent.slice(endIndex + DATA_END_MARKER.length).replace(/^\s+/, "");
+    return `${before}\n\n${block}\n\n${after}`.trimEnd() + "\n";
+  }
+
+  return `${noteContent.replace(/\s*$/, "")}\n\n${block}\n`.trimStart();
+}
