@@ -1,6 +1,6 @@
 {
   "id": "obsidian-gantt-builder",
-  "name": "Obsidian Gantt Builder",
+  "name": "Gantt Builder",
   "version": "0.1.9",
   "minAppVersion": "1.5.0",
   "description": "Build Mermaid Gantt charts from tasks in the current note via UI.",
