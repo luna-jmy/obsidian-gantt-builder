@@ -673,7 +673,7 @@ var GanttBuilderEditor = class {
     const table = this.tableWrapEl.createEl("table", { cls: "gantt-builder-table" });
     const head = table.createTHead();
     const headerRow = head.insertRow();
-    ["\u64CD\u4F5C", "\u4EFB\u52A1", "\u65E5\u671F", "ID/\u4F9D\u8D56"].forEach((title) => headerRow.createEl("th", { text: title }));
+    ["\u64CD\u4F5C", "\u5206\u7EC4", "\u4EFB\u52A1", "\u65E5\u671F", "ID/\u4F9D\u8D56"].forEach((title) => headerRow.createEl("th", { text: title }));
     const body = table.createTBody();
     for (const task of this.tasks) {
       const row = body.insertRow();
@@ -699,9 +699,9 @@ var GanttBuilderEditor = class {
         await this.refreshPreview();
       });
       const actionCell = row.insertCell();
-      actionCell.addClass("gantt-builder-action-stack");
-      const addButton = actionCell.createEl("button", { text: "+", attr: { title: "\u5728\u5F53\u524D\u5206\u7EC4\u65B0\u589E\u4EFB\u52A1" } });
-      const removeButton = actionCell.createEl("button", { text: "-", cls: "mod-warning", attr: { title: "\u5220\u9664\u4EFB\u52A1" } });
+      const actionStack = actionCell.createDiv("gantt-builder-action-stack");
+      const addButton = actionStack.createEl("button", { text: "+", attr: { title: "\u5728\u5F53\u524D\u5206\u7EC4\u65B0\u589E\u4EFB\u52A1" } });
+      const removeButton = actionStack.createEl("button", { text: "-", cls: "mod-warning", attr: { title: "\u5220\u9664\u4EFB\u52A1" } });
       addButton.onclick = async () => {
         const index = this.tasks.findIndex((item) => item.internalId === task.internalId);
         this.tasks.splice(index + 1, 0, createEmptyTask(task.section));
@@ -716,19 +716,24 @@ var GanttBuilderEditor = class {
         this.renderTaskTable();
         await this.refreshPreview();
       };
-      const taskCell = row.insertCell();
-      taskCell.addClass("gantt-builder-task-main-cell");
-      const sectionInput = taskCell.createEl("input", { type: "text", value: task.section, placeholder: "\u5206\u7EC4\uFF0C\u5982\uFF1A\u6267\u884C\u9636\u6BB5" });
+      const sectionCell = row.insertCell();
+      const sectionInput = sectionCell.createEl("input", {
+        type: "text",
+        value: task.section,
+        placeholder: "\u5206\u7EC4\uFF0C\u5982\uFF1A\u6267\u884C\u9636\u6BB5"
+      });
       sectionInput.onchange = async () => {
         task.section = sectionInput.value.trim();
         await this.refreshPreview();
       };
-      const taskInput = taskCell.createEl("input", { type: "text", value: task.name, placeholder: "\u4EFB\u52A1\u540D\u79F0" });
+      const taskCell = row.insertCell();
+      const taskMainCell = taskCell.createDiv("gantt-builder-task-main-cell");
+      const taskInput = taskMainCell.createEl("input", { type: "text", value: task.name, placeholder: "\u4EFB\u52A1\u540D\u79F0" });
       taskInput.onchange = async () => {
         task.name = taskInput.value.trim();
         await this.refreshPreview();
       };
-      const statusRow = taskCell.createDiv("gantt-builder-status-inline");
+      const statusRow = taskMainCell.createDiv("gantt-builder-status-inline");
       const doneLabel = statusRow.createEl("label");
       const doneToggle = doneLabel.createEl("input", { attr: { type: "checkbox" } });
       doneToggle.checked = task.completed;
@@ -754,15 +759,15 @@ var GanttBuilderEditor = class {
       };
       criticalLabel.appendText("\u5173\u952E");
       const dateCell = row.insertCell();
-      dateCell.addClass("gantt-builder-date-stack");
-      dateCell.createDiv("gantt-builder-subtitle").setText("\u65E5\u671F");
-      const startInput = dateCell.createEl("input", { type: "date", value: task.startDate });
+      const dateStack = dateCell.createDiv("gantt-builder-date-stack");
+      dateStack.createDiv("gantt-builder-subtitle").setText("\u65E5\u671F");
+      const startInput = dateStack.createEl("input", { type: "date", value: task.startDate });
       startInput.onchange = async () => {
         task.startDate = startInput.value.trim();
         this.renderTaskTable();
         await this.refreshPreview();
       };
-      const dueInput = dateCell.createEl("input", { type: "date", value: task.dueDate });
+      const dueInput = dateStack.createEl("input", { type: "date", value: task.dueDate });
       dueInput.onchange = async () => {
         task.dueDate = dueInput.value.trim();
         this.renderTaskTable();
@@ -770,11 +775,11 @@ var GanttBuilderEditor = class {
       };
       if (this.hasDateConflict(task)) {
         row.classList.add("gantt-builder-row-conflict");
-        dateCell.createDiv("gantt-builder-date-conflict").setText("\u65E5\u671F\u51B2\u7A81");
+        dateStack.createDiv("gantt-builder-date-conflict").setText("\u65E5\u671F\u51B2\u7A81");
       }
       const relationCell = row.insertCell();
-      relationCell.addClass("gantt-builder-relation-stack");
-      const idWrap = relationCell.createDiv("gantt-builder-id-cell");
+      const relationStack = relationCell.createDiv("gantt-builder-relation-stack");
+      const idWrap = relationStack.createDiv("gantt-builder-id-cell");
       idWrap.createDiv("gantt-builder-subtitle").setText("ID");
       const idInput = idWrap.createEl("input", { type: "text", value: task.id, placeholder: "\u53EF\u9009" });
       idInput.onchange = async () => {
@@ -791,7 +796,7 @@ var GanttBuilderEditor = class {
         this.renderTaskTable();
         await this.refreshPreview();
       };
-      const depWrap = relationCell.createDiv();
+      const depWrap = relationStack.createDiv();
       depWrap.createDiv("gantt-builder-subtitle").setText("\u4F9D\u8D56");
       const dependencySelect = depWrap.createEl("select");
       dependencySelect.addClass("gantt-builder-dependency-select");

@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-03-23
+
+### Fixed
+- Fixed task table layout regression where all row fields were squeezed into the first column.
+- Fixed row cell rendering by keeping `td` as native table cells and using inner wrappers for flex layout.
+
+### Changed
+- Split `分组` into an independent column (now: 操作 | 分组 | 任务 | 日期 | ID/依赖).
+- Adjusted table min-width and per-column widths for the new 5-column layout.
+
 ## [0.1.6] - 2026-03-23
 
 ### Changed

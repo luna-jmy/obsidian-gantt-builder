@@ -317,7 +317,7 @@ class GanttBuilderEditor {
     const table = this.tableWrapEl.createEl("table", { cls: "gantt-builder-table" });
     const head = table.createTHead();
     const headerRow = head.insertRow();
-    ["操作", "任务", "日期", "ID/依赖"].forEach((title) => headerRow.createEl("th", { text: title }));
+    ["操作", "分组", "任务", "日期", "ID/依赖"].forEach((title) => headerRow.createEl("th", { text: title }));
 
     const body = table.createTBody();
     for (const task of this.tasks) {
@@ -346,9 +346,9 @@ class GanttBuilderEditor {
       });
 
       const actionCell = row.insertCell();
-      actionCell.addClass("gantt-builder-action-stack");
-      const addButton = actionCell.createEl("button", { text: "+", attr: { title: "在当前分组新增任务" } });
-      const removeButton = actionCell.createEl("button", { text: "-", cls: "mod-warning", attr: { title: "删除任务" } });
+      const actionStack = actionCell.createDiv("gantt-builder-action-stack");
+      const addButton = actionStack.createEl("button", { text: "+", attr: { title: "在当前分组新增任务" } });
+      const removeButton = actionStack.createEl("button", { text: "-", cls: "mod-warning", attr: { title: "删除任务" } });
       addButton.onclick = async () => {
         const index = this.tasks.findIndex((item) => item.internalId === task.internalId);
         this.tasks.splice(index + 1, 0, createEmptyTask(task.section));
@@ -364,20 +364,26 @@ class GanttBuilderEditor {
         await this.refreshPreview();
       };
 
-      const taskCell = row.insertCell();
-      taskCell.addClass("gantt-builder-task-main-cell");
-      const sectionInput = taskCell.createEl("input", { type: "text", value: task.section, placeholder: "分组，如：执行阶段" });
+      const sectionCell = row.insertCell();
+      const sectionInput = sectionCell.createEl("input", {
+        type: "text",
+        value: task.section,
+        placeholder: "分组，如：执行阶段",
+      });
       sectionInput.onchange = async () => {
         task.section = sectionInput.value.trim();
         await this.refreshPreview();
       };
-      const taskInput = taskCell.createEl("input", { type: "text", value: task.name, placeholder: "任务名称" });
+
+      const taskCell = row.insertCell();
+      const taskMainCell = taskCell.createDiv("gantt-builder-task-main-cell");
+      const taskInput = taskMainCell.createEl("input", { type: "text", value: task.name, placeholder: "任务名称" });
       taskInput.onchange = async () => {
         task.name = taskInput.value.trim();
         await this.refreshPreview();
       };
 
-      const statusRow = taskCell.createDiv("gantt-builder-status-inline");
+      const statusRow = taskMainCell.createDiv("gantt-builder-status-inline");
       const doneLabel = statusRow.createEl("label");
       const doneToggle = doneLabel.createEl("input", { attr: { type: "checkbox" } });
       doneToggle.checked = task.completed;
@@ -406,15 +412,15 @@ class GanttBuilderEditor {
       criticalLabel.appendText("关键");
 
       const dateCell = row.insertCell();
-      dateCell.addClass("gantt-builder-date-stack");
-      dateCell.createDiv("gantt-builder-subtitle").setText("日期");
-      const startInput = dateCell.createEl("input", { type: "date", value: task.startDate });
+      const dateStack = dateCell.createDiv("gantt-builder-date-stack");
+      dateStack.createDiv("gantt-builder-subtitle").setText("日期");
+      const startInput = dateStack.createEl("input", { type: "date", value: task.startDate });
       startInput.onchange = async () => {
         task.startDate = startInput.value.trim();
         this.renderTaskTable();
         await this.refreshPreview();
       };
-      const dueInput = dateCell.createEl("input", { type: "date", value: task.dueDate });
+      const dueInput = dateStack.createEl("input", { type: "date", value: task.dueDate });
       dueInput.onchange = async () => {
         task.dueDate = dueInput.value.trim();
         this.renderTaskTable();
@@ -422,12 +428,12 @@ class GanttBuilderEditor {
       };
       if (this.hasDateConflict(task)) {
         row.classList.add("gantt-builder-row-conflict");
-        dateCell.createDiv("gantt-builder-date-conflict").setText("日期冲突");
+        dateStack.createDiv("gantt-builder-date-conflict").setText("日期冲突");
       }
 
       const relationCell = row.insertCell();
-      relationCell.addClass("gantt-builder-relation-stack");
-      const idWrap = relationCell.createDiv("gantt-builder-id-cell");
+      const relationStack = relationCell.createDiv("gantt-builder-relation-stack");
+      const idWrap = relationStack.createDiv("gantt-builder-id-cell");
       idWrap.createDiv("gantt-builder-subtitle").setText("ID");
       const idInput = idWrap.createEl("input", { type: "text", value: task.id, placeholder: "可选" });
       idInput.onchange = async () => {
@@ -445,7 +451,7 @@ class GanttBuilderEditor {
         await this.refreshPreview();
       };
 
-      const depWrap = relationCell.createDiv();
+      const depWrap = relationStack.createDiv();
       depWrap.createDiv("gantt-builder-subtitle").setText("依赖");
       const dependencySelect = depWrap.createEl("select");
       dependencySelect.addClass("gantt-builder-dependency-select");

@@ -80,7 +80,7 @@
 .gantt-builder-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 980px;
+  min-width: 1120px;
 }
 
 .gantt-builder-table th,
@@ -95,14 +95,18 @@
 }
 
 .gantt-builder-table th:nth-child(2) {
-  min-width: 420px;
+  width: 180px;
 }
 
 .gantt-builder-table th:nth-child(3) {
-  width: 210px;
+  min-width: 320px;
 }
 
 .gantt-builder-table th:nth-child(4) {
+  width: 210px;
+}
+
+.gantt-builder-table th:nth-child(5) {
   min-width: 260px;
 }
 
