@@ -196,6 +196,8 @@ class GanttBuilderEditor {
       await this.saveGanttToNote();
     };
 
+    this.rootEl.createDiv("gantt-builder-note-title").setText(`当前笔记：${this.file.basename}`);
+
     const taskHeaderEl = this.rootEl.createDiv("gantt-builder-task-header");
     taskHeaderEl.createEl("h3", { text: "任务列表（支持拖拽排序）" });
     const addTaskButton = taskHeaderEl.createEl("button", { text: "新增任务", cls: "mod-cta" });
@@ -315,7 +317,7 @@ class GanttBuilderEditor {
     const table = this.tableWrapEl.createEl("table", { cls: "gantt-builder-table" });
     const head = table.createTHead();
     const headerRow = head.insertRow();
-    ["分组", "状态", "任务", "开始", "截止", "ID", "依赖", "操作"].forEach((title) => headerRow.createEl("th", { text: title }));
+    ["操作", "任务", "日期", "ID/依赖"].forEach((title) => headerRow.createEl("th", { text: title }));
 
     const body = table.createTBody();
     for (const task of this.tasks) {
@@ -343,25 +345,40 @@ class GanttBuilderEditor {
         await this.refreshPreview();
       });
 
-      const sectionCell = row.insertCell();
-      sectionCell.addClass("gantt-builder-section-cell");
-      const sectionInput = sectionCell.createEl("input", { type: "text", value: task.section, placeholder: "如：执行阶段" });
-      sectionInput.onchange = async () => {
-        task.section = sectionInput.value.trim();
+      const actionCell = row.insertCell();
+      actionCell.addClass("gantt-builder-action-stack");
+      const addButton = actionCell.createEl("button", { text: "+", attr: { title: "在当前分组新增任务" } });
+      const removeButton = actionCell.createEl("button", { text: "-", cls: "mod-warning", attr: { title: "删除任务" } });
+      addButton.onclick = async () => {
+        const index = this.tasks.findIndex((item) => item.internalId === task.internalId);
+        this.tasks.splice(index + 1, 0, createEmptyTask(task.section));
+        this.renderTaskTable();
         await this.refreshPreview();
       };
-      const addInSectionButton = sectionCell.createEl("button", { text: "＋", attr: { title: "在当前分组新增任务" } });
-      addInSectionButton.onclick = async () => {
-        const insertIndex = this.tasks.findIndex((item) => item.internalId === task.internalId);
-        const newTask = createEmptyTask(task.section);
-        this.tasks.splice(insertIndex + 1, 0, newTask);
+      removeButton.onclick = async () => {
+        this.tasks = this.tasks.filter((item) => item.internalId !== task.internalId);
+        if (!this.tasks.length) {
+          this.tasks.push(createEmptyTask());
+        }
         this.renderTaskTable();
         await this.refreshPreview();
       };
 
-      const statusCell = row.insertCell();
-      statusCell.addClass("gantt-builder-status");
-      const doneLabel = statusCell.createEl("label");
+      const taskCell = row.insertCell();
+      taskCell.addClass("gantt-builder-task-main-cell");
+      const sectionInput = taskCell.createEl("input", { type: "text", value: task.section, placeholder: "分组，如：执行阶段" });
+      sectionInput.onchange = async () => {
+        task.section = sectionInput.value.trim();
+        await this.refreshPreview();
+      };
+      const taskInput = taskCell.createEl("input", { type: "text", value: task.name, placeholder: "任务名称" });
+      taskInput.onchange = async () => {
+        task.name = taskInput.value.trim();
+        await this.refreshPreview();
+      };
+
+      const statusRow = taskCell.createDiv("gantt-builder-status-inline");
+      const doneLabel = statusRow.createEl("label");
       const doneToggle = doneLabel.createEl("input", { attr: { type: "checkbox" } });
       doneToggle.checked = task.completed;
       doneToggle.onchange = async () => {
@@ -370,7 +387,7 @@ class GanttBuilderEditor {
       };
       doneLabel.appendText("完成");
 
-      const milestoneLabel = statusCell.createEl("label");
+      const milestoneLabel = statusRow.createEl("label");
       const milestoneToggle = milestoneLabel.createEl("input", { attr: { type: "checkbox" } });
       milestoneToggle.checked = task.isMilestone;
       milestoneToggle.onchange = async () => {
@@ -379,7 +396,7 @@ class GanttBuilderEditor {
       };
       milestoneLabel.appendText("里程碑");
 
-      const criticalLabel = statusCell.createEl("label");
+      const criticalLabel = statusRow.createEl("label");
       const criticalToggle = criticalLabel.createEl("input", { attr: { type: "checkbox" } });
       criticalToggle.checked = task.isHighPriority;
       criticalToggle.onchange = async () => {
@@ -388,40 +405,37 @@ class GanttBuilderEditor {
       };
       criticalLabel.appendText("关键");
 
-      this.bindTextInputCell(row, task.name, "任务名称", async (value) => {
-        task.name = value;
-        await this.refreshPreview();
-      });
-
-      this.bindDateInputCell(row, task.startDate, async (value) => {
-        task.startDate = value;
+      const dateCell = row.insertCell();
+      dateCell.addClass("gantt-builder-date-stack");
+      dateCell.createDiv("gantt-builder-subtitle").setText("日期");
+      const startInput = dateCell.createEl("input", { type: "date", value: task.startDate });
+      startInput.onchange = async () => {
+        task.startDate = startInput.value.trim();
         this.renderTaskTable();
         await this.refreshPreview();
-      });
-
-      const dueCell = row.insertCell();
-      const dueInput = dueCell.createEl("input", { type: "date", value: task.dueDate });
+      };
+      const dueInput = dateCell.createEl("input", { type: "date", value: task.dueDate });
       dueInput.onchange = async () => {
         task.dueDate = dueInput.value.trim();
         this.renderTaskTable();
         await this.refreshPreview();
       };
-
       if (this.hasDateConflict(task)) {
         row.classList.add("gantt-builder-row-conflict");
-        const warning = dueCell.createDiv("gantt-builder-date-conflict");
-        warning.setText("日期冲突");
+        dateCell.createDiv("gantt-builder-date-conflict").setText("日期冲突");
       }
 
-      const idCell = row.insertCell();
-      idCell.addClass("gantt-builder-id-cell");
-      const idInput = idCell.createEl("input", { type: "text", value: task.id, placeholder: "可选" });
+      const relationCell = row.insertCell();
+      relationCell.addClass("gantt-builder-relation-stack");
+      const idWrap = relationCell.createDiv("gantt-builder-id-cell");
+      idWrap.createDiv("gantt-builder-subtitle").setText("ID");
+      const idInput = idWrap.createEl("input", { type: "text", value: task.id, placeholder: "可选" });
       idInput.onchange = async () => {
         task.id = idInput.value.trim();
         this.renderTaskTable();
         await this.refreshPreview();
       };
-      const randomButton = idCell.createEl("button", {
+      const randomButton = idWrap.createEl("button", {
         text: "🎲",
         attr: { title: "自动生成随机 ID", "aria-label": "自动生成随机 ID" },
       });
@@ -431,8 +445,9 @@ class GanttBuilderEditor {
         await this.refreshPreview();
       };
 
-      const dependencyCell = row.insertCell();
-      const dependencySelect = dependencyCell.createEl("select");
+      const depWrap = relationCell.createDiv();
+      depWrap.createDiv("gantt-builder-subtitle").setText("依赖");
+      const dependencySelect = depWrap.createEl("select");
       dependencySelect.addClass("gantt-builder-dependency-select");
       dependencySelect.createEl("option", { value: "", text: "无依赖" });
       for (const option of this.getDependencyOptions(task)) {
@@ -443,35 +458,7 @@ class GanttBuilderEditor {
         task.dependency = dependencySelect.value;
         await this.refreshPreview();
       };
-
-      const actionCell = row.insertCell();
-      const removeButton = actionCell.createEl("button", { text: "删除", cls: "mod-warning" });
-      removeButton.onclick = async () => {
-        this.tasks = this.tasks.filter((item) => item.internalId !== task.internalId);
-        if (!this.tasks.length) {
-          this.tasks.push(createEmptyTask());
-        }
-        this.renderTaskTable();
-        await this.refreshPreview();
-      };
     }
-  }
-
-  private bindTextInputCell(
-    row: HTMLTableRowElement,
-    value: string,
-    placeholder: string,
-    onChange: (value: string) => Promise<void>,
-  ): void {
-    const cell = row.insertCell();
-    const input = cell.createEl("input", { type: "text", value, placeholder });
-    input.onchange = async () => onChange(input.value.trim());
-  }
-
-  private bindDateInputCell(row: HTMLTableRowElement, value: string, onChange: (value: string) => Promise<void>): void {
-    const cell = row.insertCell();
-    const input = cell.createEl("input", { type: "date", value });
-    input.onchange = async () => onChange(input.value.trim());
   }
 
   private getCursorOffsetForCurrentFile(): number | undefined {
@@ -571,7 +558,6 @@ class GanttBuilderEditor {
       for (let i = 0; i < binary.length; i++) {
         bytes[i] = binary.charCodeAt(i);
       }
-
       const savedPath = await this.saveBinaryToVault(`${this.file.basename}-gantt-${Date.now()}.png`, bytes);
       new Notice(`PNG 已导出：${savedPath}`);
     } finally {
@@ -703,7 +689,6 @@ class GanttBuilderWorkspaceView extends ItemView {
       return;
     }
     container.empty();
-
     if (!this.file) {
       container.createEl("div", { text: "请从命令或功能区在某条笔记中打开 Gantt Builder。" });
       return;
@@ -736,9 +721,7 @@ export default class ObsidianGanttBuilderPlugin extends Plugin {
     await this.loadSettings();
     this.registerView(VIEW_TYPE_GANTT_BUILDER, (leaf) => new GanttBuilderWorkspaceView(leaf, this));
 
-    this.addRibbonIcon("calendar-clock", "打开当前笔记 Gantt Builder", () => {
-      void this.openBuilderForActiveNote();
-    });
+    this.addRibbonIcon("calendar-clock", "打开当前笔记 Gantt Builder", () => void this.openBuilderForActiveNote());
 
     this.addCommand({
       id: "open-note-gantt-builder",

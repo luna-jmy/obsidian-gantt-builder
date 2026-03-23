@@ -38,8 +38,10 @@ var dependencyRegex = new RegExp(`(?:\\u{26D4}\\uFE0F?\\s*|\\[(?:dependsOn|depen
 var ownerRegex = /\[owner::\s*([^\]]+)\]/;
 var milestoneRegex = new RegExp(`#milestone|\\u{1F6A9}\\uFE0F?`, "iu");
 var criticalRegex = new RegExp(`#crit|#critical|\\u{1F53A}\\uFE0F?`, "iu");
-var DATA_START_MARKER = "%% gantt-builder:data:start %%";
-var DATA_END_MARKER = "%% gantt-builder:data:end %%";
+var DATA_START_MARKER = "%% gantt-builder-data-start %%";
+var DATA_END_MARKER = "%% gantt-builder-data-end %%";
+var LEGACY_DATA_START_MARKER = "%% gantt-builder:data:start %%";
+var LEGACY_DATA_END_MARKER = "%% gantt-builder:data:end %%";
 var GANTT_START_MARKER = "%% gantt-builder:start %%";
 var GANTT_END_MARKER = "%% gantt-builder:end %%";
 var DEFAULT_CHART_TITLE = "Gantt Chart";
@@ -332,14 +334,20 @@ ${mermaidCode}
 function loadPersistedGanttData(noteContent) {
   const ganttData = parseTasksFromGanttBlock(noteContent);
   const defaultTitle = ganttData?.chartTitle ?? DEFAULT_CHART_TITLE;
-  const startIndex = noteContent.indexOf(DATA_START_MARKER);
-  const endIndex = noteContent.indexOf(DATA_END_MARKER);
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    const scopedContent = noteContent.slice(startIndex + DATA_START_MARKER.length, endIndex);
-    return {
-      chartTitle: defaultTitle,
-      tasks: parseTasksFromNote(scopedContent)
-    };
+  const scopes = [
+    { start: DATA_START_MARKER, end: DATA_END_MARKER },
+    { start: LEGACY_DATA_START_MARKER, end: LEGACY_DATA_END_MARKER }
+  ];
+  for (const scope of scopes) {
+    const startIndex = noteContent.indexOf(scope.start);
+    const endIndex = noteContent.indexOf(scope.end);
+    if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+      const scopedContent = noteContent.slice(startIndex + scope.start.length, endIndex);
+      return {
+        chartTitle: defaultTitle,
+        tasks: parseTasksFromNote(scopedContent)
+      };
+    }
   }
   if (ganttData) {
     return ganttData;
@@ -407,18 +415,7 @@ ${ganttBlock}
 }
 function serializeTasksToMarkdown(tasks) {
   const lines = [];
-  let lastSection = "__none__";
   for (const task of tasks) {
-    const section = (task.section || "").trim();
-    if (section !== lastSection) {
-      if (section) {
-        if (lines.length) {
-          lines.push("");
-        }
-        lines.push(`### ${section}`);
-      }
-      lastSection = section;
-    }
     const parts = [`- [${task.completed ? "x" : " "}]`, task.name || "Untitled Task"];
     if (task.startDate) {
       parts.push(`\u{1F6EB} ${task.startDate}`);
@@ -447,16 +444,22 @@ function upsertTaskScope(noteContent, tasks) {
   const block = `${DATA_START_MARKER}
 ${taskBody}
 ${DATA_END_MARKER}`;
-  const startIndex = noteContent.indexOf(DATA_START_MARKER);
-  const endIndex = noteContent.indexOf(DATA_END_MARKER);
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    const before = noteContent.slice(0, startIndex).replace(/\s+$/, "");
-    const after = noteContent.slice(endIndex + DATA_END_MARKER.length).replace(/^\s+/, "");
-    return `${before}
+  const scopes = [
+    { start: DATA_START_MARKER, end: DATA_END_MARKER },
+    { start: LEGACY_DATA_START_MARKER, end: LEGACY_DATA_END_MARKER }
+  ];
+  for (const scope of scopes) {
+    const startIndex = noteContent.indexOf(scope.start);
+    const endIndex = noteContent.indexOf(scope.end);
+    if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+      const before = noteContent.slice(0, startIndex).replace(/\s+$/, "");
+      const after = noteContent.slice(endIndex + scope.end.length).replace(/^\s+/, "");
+      return `${before}
 
 ${block}
 
 ${after}`.trimEnd() + "\n";
+    }
   }
   return `${noteContent.replace(/\s*$/, "")}
 
@@ -571,6 +574,7 @@ var GanttBuilderEditor = class {
     saveGanttButton.onclick = async () => {
       await this.saveGanttToNote();
     };
+    this.rootEl.createDiv("gantt-builder-note-title").setText(`\u5F53\u524D\u7B14\u8BB0\uFF1A${this.file.basename}`);
     const taskHeaderEl = this.rootEl.createDiv("gantt-builder-task-header");
     taskHeaderEl.createEl("h3", { text: "\u4EFB\u52A1\u5217\u8868\uFF08\u652F\u6301\u62D6\u62FD\u6392\u5E8F\uFF09" });
     const addTaskButton = taskHeaderEl.createEl("button", { text: "\u65B0\u589E\u4EFB\u52A1", cls: "mod-cta" });
@@ -669,7 +673,7 @@ var GanttBuilderEditor = class {
     const table = this.tableWrapEl.createEl("table", { cls: "gantt-builder-table" });
     const head = table.createTHead();
     const headerRow = head.insertRow();
-    ["\u5206\u7EC4", "\u72B6\u6001", "\u4EFB\u52A1", "\u5F00\u59CB", "\u622A\u6B62", "ID", "\u4F9D\u8D56", "\u64CD\u4F5C"].forEach((title) => headerRow.createEl("th", { text: title }));
+    ["\u64CD\u4F5C", "\u4EFB\u52A1", "\u65E5\u671F", "ID/\u4F9D\u8D56"].forEach((title) => headerRow.createEl("th", { text: title }));
     const body = table.createTBody();
     for (const task of this.tasks) {
       const row = body.insertRow();
@@ -694,24 +698,38 @@ var GanttBuilderEditor = class {
         this.renderTaskTable();
         await this.refreshPreview();
       });
-      const sectionCell = row.insertCell();
-      sectionCell.addClass("gantt-builder-section-cell");
-      const sectionInput = sectionCell.createEl("input", { type: "text", value: task.section, placeholder: "\u5982\uFF1A\u6267\u884C\u9636\u6BB5" });
+      const actionCell = row.insertCell();
+      actionCell.addClass("gantt-builder-action-stack");
+      const addButton = actionCell.createEl("button", { text: "+", attr: { title: "\u5728\u5F53\u524D\u5206\u7EC4\u65B0\u589E\u4EFB\u52A1" } });
+      const removeButton = actionCell.createEl("button", { text: "-", cls: "mod-warning", attr: { title: "\u5220\u9664\u4EFB\u52A1" } });
+      addButton.onclick = async () => {
+        const index = this.tasks.findIndex((item) => item.internalId === task.internalId);
+        this.tasks.splice(index + 1, 0, createEmptyTask(task.section));
+        this.renderTaskTable();
+        await this.refreshPreview();
+      };
+      removeButton.onclick = async () => {
+        this.tasks = this.tasks.filter((item) => item.internalId !== task.internalId);
+        if (!this.tasks.length) {
+          this.tasks.push(createEmptyTask());
+        }
+        this.renderTaskTable();
+        await this.refreshPreview();
+      };
+      const taskCell = row.insertCell();
+      taskCell.addClass("gantt-builder-task-main-cell");
+      const sectionInput = taskCell.createEl("input", { type: "text", value: task.section, placeholder: "\u5206\u7EC4\uFF0C\u5982\uFF1A\u6267\u884C\u9636\u6BB5" });
       sectionInput.onchange = async () => {
         task.section = sectionInput.value.trim();
         await this.refreshPreview();
       };
-      const addInSectionButton = sectionCell.createEl("button", { text: "\uFF0B", attr: { title: "\u5728\u5F53\u524D\u5206\u7EC4\u65B0\u589E\u4EFB\u52A1" } });
-      addInSectionButton.onclick = async () => {
-        const insertIndex = this.tasks.findIndex((item) => item.internalId === task.internalId);
-        const newTask = createEmptyTask(task.section);
-        this.tasks.splice(insertIndex + 1, 0, newTask);
-        this.renderTaskTable();
+      const taskInput = taskCell.createEl("input", { type: "text", value: task.name, placeholder: "\u4EFB\u52A1\u540D\u79F0" });
+      taskInput.onchange = async () => {
+        task.name = taskInput.value.trim();
         await this.refreshPreview();
       };
-      const statusCell = row.insertCell();
-      statusCell.addClass("gantt-builder-status");
-      const doneLabel = statusCell.createEl("label");
+      const statusRow = taskCell.createDiv("gantt-builder-status-inline");
+      const doneLabel = statusRow.createEl("label");
       const doneToggle = doneLabel.createEl("input", { attr: { type: "checkbox" } });
       doneToggle.checked = task.completed;
       doneToggle.onchange = async () => {
@@ -719,7 +737,7 @@ var GanttBuilderEditor = class {
         await this.refreshPreview();
       };
       doneLabel.appendText("\u5B8C\u6210");
-      const milestoneLabel = statusCell.createEl("label");
+      const milestoneLabel = statusRow.createEl("label");
       const milestoneToggle = milestoneLabel.createEl("input", { attr: { type: "checkbox" } });
       milestoneToggle.checked = task.isMilestone;
       milestoneToggle.onchange = async () => {
@@ -727,7 +745,7 @@ var GanttBuilderEditor = class {
         await this.refreshPreview();
       };
       milestoneLabel.appendText("\u91CC\u7A0B\u7891");
-      const criticalLabel = statusCell.createEl("label");
+      const criticalLabel = statusRow.createEl("label");
       const criticalToggle = criticalLabel.createEl("input", { attr: { type: "checkbox" } });
       criticalToggle.checked = task.isHighPriority;
       criticalToggle.onchange = async () => {
@@ -735,17 +753,16 @@ var GanttBuilderEditor = class {
         await this.refreshPreview();
       };
       criticalLabel.appendText("\u5173\u952E");
-      this.bindTextInputCell(row, task.name, "\u4EFB\u52A1\u540D\u79F0", async (value) => {
-        task.name = value;
-        await this.refreshPreview();
-      });
-      this.bindDateInputCell(row, task.startDate, async (value) => {
-        task.startDate = value;
+      const dateCell = row.insertCell();
+      dateCell.addClass("gantt-builder-date-stack");
+      dateCell.createDiv("gantt-builder-subtitle").setText("\u65E5\u671F");
+      const startInput = dateCell.createEl("input", { type: "date", value: task.startDate });
+      startInput.onchange = async () => {
+        task.startDate = startInput.value.trim();
         this.renderTaskTable();
         await this.refreshPreview();
-      });
-      const dueCell = row.insertCell();
-      const dueInput = dueCell.createEl("input", { type: "date", value: task.dueDate });
+      };
+      const dueInput = dateCell.createEl("input", { type: "date", value: task.dueDate });
       dueInput.onchange = async () => {
         task.dueDate = dueInput.value.trim();
         this.renderTaskTable();
@@ -753,18 +770,19 @@ var GanttBuilderEditor = class {
       };
       if (this.hasDateConflict(task)) {
         row.classList.add("gantt-builder-row-conflict");
-        const warning = dueCell.createDiv("gantt-builder-date-conflict");
-        warning.setText("\u65E5\u671F\u51B2\u7A81");
+        dateCell.createDiv("gantt-builder-date-conflict").setText("\u65E5\u671F\u51B2\u7A81");
       }
-      const idCell = row.insertCell();
-      idCell.addClass("gantt-builder-id-cell");
-      const idInput = idCell.createEl("input", { type: "text", value: task.id, placeholder: "\u53EF\u9009" });
+      const relationCell = row.insertCell();
+      relationCell.addClass("gantt-builder-relation-stack");
+      const idWrap = relationCell.createDiv("gantt-builder-id-cell");
+      idWrap.createDiv("gantt-builder-subtitle").setText("ID");
+      const idInput = idWrap.createEl("input", { type: "text", value: task.id, placeholder: "\u53EF\u9009" });
       idInput.onchange = async () => {
         task.id = idInput.value.trim();
         this.renderTaskTable();
         await this.refreshPreview();
       };
-      const randomButton = idCell.createEl("button", {
+      const randomButton = idWrap.createEl("button", {
         text: "\u{1F3B2}",
         attr: { title: "\u81EA\u52A8\u751F\u6210\u968F\u673A ID", "aria-label": "\u81EA\u52A8\u751F\u6210\u968F\u673A ID" }
       });
@@ -773,8 +791,9 @@ var GanttBuilderEditor = class {
         this.renderTaskTable();
         await this.refreshPreview();
       };
-      const dependencyCell = row.insertCell();
-      const dependencySelect = dependencyCell.createEl("select");
+      const depWrap = relationCell.createDiv();
+      depWrap.createDiv("gantt-builder-subtitle").setText("\u4F9D\u8D56");
+      const dependencySelect = depWrap.createEl("select");
       dependencySelect.addClass("gantt-builder-dependency-select");
       dependencySelect.createEl("option", { value: "", text: "\u65E0\u4F9D\u8D56" });
       for (const option of this.getDependencyOptions(task)) {
@@ -785,27 +804,7 @@ var GanttBuilderEditor = class {
         task.dependency = dependencySelect.value;
         await this.refreshPreview();
       };
-      const actionCell = row.insertCell();
-      const removeButton = actionCell.createEl("button", { text: "\u5220\u9664", cls: "mod-warning" });
-      removeButton.onclick = async () => {
-        this.tasks = this.tasks.filter((item) => item.internalId !== task.internalId);
-        if (!this.tasks.length) {
-          this.tasks.push(createEmptyTask());
-        }
-        this.renderTaskTable();
-        await this.refreshPreview();
-      };
     }
-  }
-  bindTextInputCell(row, value, placeholder, onChange) {
-    const cell = row.insertCell();
-    const input = cell.createEl("input", { type: "text", value, placeholder });
-    input.onchange = async () => onChange(input.value.trim());
-  }
-  bindDateInputCell(row, value, onChange) {
-    const cell = row.insertCell();
-    const input = cell.createEl("input", { type: "date", value });
-    input.onchange = async () => onChange(input.value.trim());
   }
   getCursorOffsetForCurrentFile() {
     const markdownView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
@@ -1035,9 +1034,7 @@ var ObsidianGanttBuilderPlugin = class extends import_obsidian.Plugin {
   async onload() {
     await this.loadSettings();
     this.registerView(VIEW_TYPE_GANTT_BUILDER, (leaf) => new GanttBuilderWorkspaceView(leaf, this));
-    this.addRibbonIcon("calendar-clock", "\u6253\u5F00\u5F53\u524D\u7B14\u8BB0 Gantt Builder", () => {
-      void this.openBuilderForActiveNote();
-    });
+    this.addRibbonIcon("calendar-clock", "\u6253\u5F00\u5F53\u524D\u7B14\u8BB0 Gantt Builder", () => void this.openBuilderForActiveNote());
     this.addCommand({
       id: "open-note-gantt-builder",
       name: "\u6253\u5F00\u5F53\u524D\u7B14\u8BB0\u4EFB\u52A1\u7518\u7279\u6784\u5EFA\u5668",

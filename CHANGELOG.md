@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-03-23
+
+### Changed
+- Task list layout is refactored to improve alignment and editing efficiency: operation column, task content column, combined date column, and combined ID/dependency column.
+- Status controls are moved below task title in horizontal arrangement for long task readability.
+- Operation buttons are now icon-based (`+` / `-`) and stacked vertically at row start.
+- Plugin header now shows current note name to distinguish multiple open tabs.
+- `写入/更新任务` now writes plain task lines directly into task scope markers without adding headings.
+
+### Compatibility
+- Task scope markers now use safer syntax: `%% gantt-builder-data-start %%` and `%% gantt-builder-data-end %%`.
+- Backward compatibility is kept for legacy markers: `%% gantt-builder:data:start %%` and `%% gantt-builder:data:end %%`.
+
 ## [0.1.5] - 2026-03-23
 
 ### Added

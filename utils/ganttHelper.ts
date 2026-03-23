@@ -13,8 +13,10 @@ const ownerRegex = /\[owner::\s*([^\]]+)\]/;
 const milestoneRegex = new RegExp(`#milestone|\\u{1F6A9}\\uFE0F?`, "iu");
 const criticalRegex = new RegExp(`#crit|#critical|\\u{1F53A}\\uFE0F?`, "iu");
 
-const DATA_START_MARKER = "%% gantt-builder:data:start %%";
-const DATA_END_MARKER = "%% gantt-builder:data:end %%";
+const DATA_START_MARKER = "%% gantt-builder-data-start %%";
+const DATA_END_MARKER = "%% gantt-builder-data-end %%";
+const LEGACY_DATA_START_MARKER = "%% gantt-builder:data:start %%";
+const LEGACY_DATA_END_MARKER = "%% gantt-builder:data:end %%";
 const GANTT_START_MARKER = "%% gantt-builder:start %%";
 const GANTT_END_MARKER = "%% gantt-builder:end %%";
 
@@ -376,14 +378,21 @@ export function loadPersistedGanttData(noteContent: string): PersistedGanttData 
   const ganttData = parseTasksFromGanttBlock(noteContent);
   const defaultTitle = ganttData?.chartTitle ?? DEFAULT_CHART_TITLE;
 
-  const startIndex = noteContent.indexOf(DATA_START_MARKER);
-  const endIndex = noteContent.indexOf(DATA_END_MARKER);
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    const scopedContent = noteContent.slice(startIndex + DATA_START_MARKER.length, endIndex);
-    return {
-      chartTitle: defaultTitle,
-      tasks: parseTasksFromNote(scopedContent),
-    };
+  const scopes = [
+    { start: DATA_START_MARKER, end: DATA_END_MARKER },
+    { start: LEGACY_DATA_START_MARKER, end: LEGACY_DATA_END_MARKER },
+  ];
+
+  for (const scope of scopes) {
+    const startIndex = noteContent.indexOf(scope.start);
+    const endIndex = noteContent.indexOf(scope.end);
+    if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+      const scopedContent = noteContent.slice(startIndex + scope.start.length, endIndex);
+      return {
+        chartTitle: defaultTitle,
+        tasks: parseTasksFromNote(scopedContent),
+      };
+    }
   }
 
   if (ganttData) {
@@ -453,20 +462,8 @@ export function upsertGanttArtifacts(
 
 export function serializeTasksToMarkdown(tasks: Task[]): string {
   const lines: string[] = [];
-  let lastSection = "__none__";
 
   for (const task of tasks) {
-    const section = (task.section || "").trim();
-    if (section !== lastSection) {
-      if (section) {
-        if (lines.length) {
-          lines.push("");
-        }
-        lines.push(`### ${section}`);
-      }
-      lastSection = section;
-    }
-
     const parts: string[] = [`- [${task.completed ? "x" : " "}]`, task.name || "Untitled Task"];
     if (task.startDate) {
       parts.push(`🛫 ${task.startDate}`);
@@ -497,12 +494,19 @@ export function upsertTaskScope(noteContent: string, tasks: Task[]): string {
   const taskBody = serializeTasksToMarkdown(tasks);
   const block = `${DATA_START_MARKER}\n${taskBody}\n${DATA_END_MARKER}`;
 
-  const startIndex = noteContent.indexOf(DATA_START_MARKER);
-  const endIndex = noteContent.indexOf(DATA_END_MARKER);
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    const before = noteContent.slice(0, startIndex).replace(/\s+$/, "");
-    const after = noteContent.slice(endIndex + DATA_END_MARKER.length).replace(/^\s+/, "");
-    return `${before}\n\n${block}\n\n${after}`.trimEnd() + "\n";
+  const scopes = [
+    { start: DATA_START_MARKER, end: DATA_END_MARKER },
+    { start: LEGACY_DATA_START_MARKER, end: LEGACY_DATA_END_MARKER },
+  ];
+
+  for (const scope of scopes) {
+    const startIndex = noteContent.indexOf(scope.start);
+    const endIndex = noteContent.indexOf(scope.end);
+    if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+      const before = noteContent.slice(0, startIndex).replace(/\s+$/, "");
+      const after = noteContent.slice(endIndex + scope.end.length).replace(/^\s+/, "");
+      return `${before}\n\n${block}\n\n${after}`.trimEnd() + "\n";
+    }
   }
 
   return `${noteContent.replace(/\s*$/, "")}\n\n${block}\n`.trimStart();
