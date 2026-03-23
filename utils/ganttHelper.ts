@@ -1,14 +1,14 @@
 import { GanttConfig, Task } from "../types";
 
 const DATE_PATTERN = "\\d{4}-\\d{2}-\\d{2}";
-const startDateRegex = new RegExp(`(?:\\u{1F6EB}\\uFE0F?|\\[start::\\s*)(${DATE_PATTERN})\\]?`, "u");
-const scheduledDateRegex = new RegExp(`(?:\\u{23F3}\\uFE0F?|\\[scheduled::\\s*)(${DATE_PATTERN})\\]?`, "u");
-const dueDateRegex = new RegExp(`(?:\\u{1F4C5}\\uFE0F?|\\[due::\\s*)(${DATE_PATTERN})\\]?`, "u");
+const startDateRegex = new RegExp(`(?:\\u{1F6EB}\\uFE0F?\\s*|\\[start::\\s*)(${DATE_PATTERN})\\]?`, "u");
+const scheduledDateRegex = new RegExp(`(?:\\u{23F3}\\uFE0F?\\s*|\\[scheduled::\\s*)(${DATE_PATTERN})\\]?`, "u");
+const dueDateRegex = new RegExp(`(?:\\u{1F4C5}\\uFE0F?\\s*|\\[due::\\s*)(${DATE_PATTERN})\\]?`, "u");
 const doneDateRegex = new RegExp(`(?:\\u{2705}\\uFE0F?|\\[completion::\\s*)(${DATE_PATTERN})\\]?`, "u");
 const createdDateRegex = new RegExp(`(?:\\u{2795}\\uFE0F?|\\[created::\\s*)(${DATE_PATTERN})\\]?`, "u");
 const cancelledDateRegex = new RegExp(`(?:\\u{274C}\\uFE0F?|\\[cancelled::\\s*)(${DATE_PATTERN})\\]?`, "u");
-const idRegex = new RegExp(`(?:\\u{1F194}\\uFE0F?|\\[id::\\s*)([a-zA-Z0-9_-]+)\\]?`, "u");
-const dependencyRegex = new RegExp(`(?:\\u{26D4}\\uFE0F?|\\[(?:dependsOn|depends on|depends)::\\s*)([a-zA-Z0-9_-]+)\\]?`, "iu");
+const idRegex = new RegExp(`(?:\\u{1F194}\\uFE0F?\\s*|\\[id::\\s*)([a-zA-Z0-9_-]+)\\]?`, "u");
+const dependencyRegex = new RegExp(`(?:\\u{26D4}\\uFE0F?\\s*|\\[(?:dependsOn|depends on|depends)::\\s*)([a-zA-Z0-9_-]+)\\]?`, "iu");
 const ownerRegex = /\[owner::\s*([^\]]+)\]/;
 const milestoneRegex = new RegExp(`#milestone|\\u{1F6A9}\\uFE0F?`, "iu");
 const criticalRegex = new RegExp(`#crit|#critical|\\u{1F53A}\\uFE0F?`, "iu");

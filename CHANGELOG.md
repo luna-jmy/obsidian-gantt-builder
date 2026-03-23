@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-03-23
+
+### Fixed
+- Fixed Tasks Emoji parsing when a whitespace appears after emoji markers.
+- Start (`🛫`), scheduled (`⏳`), due (`📅`), ID (`🆔`), and dependency (`⛔`) now parse correctly in common `emoji + space + value` format.
+
 ## [0.1.3] - 2026-03-23
 
 ### Added
