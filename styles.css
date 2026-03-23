@@ -95,7 +95,7 @@
 }
 
 .gantt-builder-table th:nth-child(2) {
-  width: 180px;
+  width: 120px;
 }
 
 .gantt-builder-table th:nth-child(3) {
@@ -107,7 +107,7 @@
 }
 
 .gantt-builder-table th:nth-child(5) {
-  min-width: 260px;
+  min-width: 300px;
 }
 
 .gantt-builder-row-drop {
@@ -133,6 +133,10 @@
   width: 100%;
 }
 
+.gantt-builder-table textarea {
+  width: 100%;
+}
+
 .gantt-builder-dependency-select {
   width: 100%;
 }
@@ -141,6 +145,27 @@
   display: flex;
   gap: 6px;
   align-items: center;
+}
+
+.gantt-builder-inline-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gantt-builder-inline-label {
+  width: 26px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.gantt-builder-inline-field input[type="text"],
+.gantt-builder-inline-field input[type="date"],
+.gantt-builder-inline-field select {
+  flex: 1;
+  min-width: 0;
 }
 
 .gantt-builder-action-stack {
@@ -177,7 +202,7 @@
 .gantt-builder-relation-stack {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .gantt-builder-subtitle {
@@ -198,6 +223,18 @@
 
 .gantt-builder-id-cell input {
   flex: 1;
+}
+
+.gantt-builder-group-input {
+  min-height: 86px;
+  resize: vertical;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.gantt-builder-bottom-settings {
+  margin-top: 8px;
 }
 
 .gantt-builder-status {

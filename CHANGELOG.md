@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-03-23
+
+### Fixed
+- Fixed task block relocation in `heading` mode: when a data scope already exists, `写入/更新任务` now removes old scope and reinserts it under the configured heading.
+- Fixed heading matching behavior to require explicit Markdown heading syntax (for example `## Project Plan`) and exact heading level/text matching.
+
+### Changed
+- Task group input is now a 2-row textarea with auto-wrap and narrower column width.
+- Date and relation fields are aligned in horizontal label+control rows (`从/至`, `ID`, `依赖`).
+- `排除周末` and `写入位置` controls are moved to the bottom settings area of the editor.
+- `默认写入位置` now applies to both Gantt and task writing behavior.
+- Added separate settings for heading-mode target insertion: `甘特图默认目标标题` and `任务默认目标标题`.
+- Writing tasks now persists section groups as `###` headings inside data scope.
+
 ## [0.1.7] - 2026-03-23
 
 ### Fixed

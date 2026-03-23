@@ -417,21 +417,61 @@ function replaceExistingGantt(noteContent: string, ganttBlock: string): string |
   return `${before}\n\n${ganttBlock}\n\n${after}`.trimEnd() + "\n";
 }
 
+function parseHeadingSpec(headingText: string): { level: number; text: string } | null {
+  const match = headingText.trim().match(/^(#{1,6})\s+(.+)$/);
+  if (!match) {
+    return null;
+  }
+  const text = match[2].replace(/\s+#+\s*$/, "").trim();
+  if (!text) {
+    return null;
+  }
+  return { level: match[1].length, text };
+}
+
+function findHeadingInsertPos(noteContent: string, headingText: string): number {
+  const target = parseHeadingSpec(headingText);
+  if (!target) {
+    return -1;
+  }
+
+  const lines = noteContent.split(/\r?\n/);
+  let offset = 0;
+
+  for (const line of lines) {
+    const headingMatch = line.match(/^\s{0,3}(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const currentText = headingMatch[2].replace(/\s+#+\s*$/, "").trim();
+      if (level === target.level && currentText === target.text) {
+        return offset + line.length + 1;
+      }
+    }
+    offset += line.length + 1;
+  }
+
+  return -1;
+}
+
 function insertAfterHeading(noteContent: string, headingText: string, block: string): string {
-  const escaped = headingText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").trim();
-  if (!escaped) {
+  const insertPos = findHeadingInsertPos(noteContent, headingText);
+  if (insertPos === -1) {
     return `${noteContent.replace(/\s*$/, "")}\n\n${block}\n`;
   }
-
-  const regex = new RegExp(`^\\s{0,3}#{1,6}\\s+${escaped}\\s*$`, "m");
-  const match = noteContent.match(regex);
-  if (!match || match.index === undefined) {
-    return `${noteContent.replace(/\s*$/, "")}\n\n${block}\n`;
-  }
-
-  const headingEnd = noteContent.indexOf("\n", match.index);
-  const insertPos = headingEnd === -1 ? noteContent.length : headingEnd + 1;
   return `${noteContent.slice(0, insertPos)}\n${block}\n${noteContent.slice(insertPos)}`.trimEnd() + "\n";
+}
+
+function insertBlockByMode(noteContent: string, block: string, options: InsertOptions): string {
+  if (options.mode === "cursor" && typeof options.cursorOffset === "number") {
+    const offset = Math.max(0, Math.min(options.cursorOffset, noteContent.length));
+    return `${noteContent.slice(0, offset)}\n${block}\n${noteContent.slice(offset)}`.trimEnd() + "\n";
+  }
+
+  if (options.mode === "heading") {
+    return insertAfterHeading(noteContent, options.headingText ?? "", block);
+  }
+
+  return `${noteContent.replace(/\s*$/, "")}\n\n${block}\n`.trimStart();
 }
 
 export function upsertGanttArtifacts(
@@ -448,49 +488,52 @@ export function upsertGanttArtifacts(
     return replaced;
   }
 
-  if (options.mode === "cursor" && typeof options.cursorOffset === "number") {
-    const offset = Math.max(0, Math.min(options.cursorOffset, noteContent.length));
-    return `${noteContent.slice(0, offset)}\n${ganttBlock}\n${noteContent.slice(offset)}`.trimEnd() + "\n";
-  }
-
-  if (options.mode === "heading") {
-    return insertAfterHeading(noteContent, options.headingText ?? "", ganttBlock);
-  }
-
-  return `${noteContent.replace(/\s*$/, "")}\n\n${ganttBlock}\n`.trimStart();
+  return insertBlockByMode(noteContent, ganttBlock, options);
 }
 
 export function serializeTasksToMarkdown(tasks: Task[]): string {
+  const sections = new Map<string, Task[]>();
+  for (const task of tasks) {
+    const sectionName = task.section.trim() || "未分组";
+    if (!sections.has(sectionName)) {
+      sections.set(sectionName, []);
+    }
+    sections.get(sectionName)?.push(task);
+  }
+
   const lines: string[] = [];
 
-  for (const task of tasks) {
-    const parts: string[] = [`- [${task.completed ? "x" : " "}]`, task.name || "Untitled Task"];
-    if (task.startDate) {
-      parts.push(`🛫 ${task.startDate}`);
+  sections.forEach((sectionTasks, sectionName) => {
+    lines.push(`### ${sectionName}`);
+    for (const task of sectionTasks) {
+      const parts: string[] = [`- [${task.completed ? "x" : " "}]`, task.name || "Untitled Task"];
+      if (task.startDate) {
+        parts.push(`🛫 ${task.startDate}`);
+      }
+      if (task.dueDate) {
+        parts.push(`📅 ${task.dueDate}`);
+      }
+      if (task.id) {
+        parts.push(`🆔 ${task.id}`);
+      }
+      if (task.dependency) {
+        parts.push(`⛔ ${task.dependency}`);
+      }
+      if (task.isHighPriority) {
+        parts.push("🔺");
+      }
+      if (task.isMilestone) {
+        parts.push("#milestone");
+      }
+      lines.push(parts.join(" "));
     }
-    if (task.dueDate) {
-      parts.push(`📅 ${task.dueDate}`);
-    }
-    if (task.id) {
-      parts.push(`🆔 ${task.id}`);
-    }
-    if (task.dependency) {
-      parts.push(`⛔ ${task.dependency}`);
-    }
-    if (task.isHighPriority) {
-      parts.push("🔺");
-    }
-    if (task.isMilestone) {
-      parts.push("#milestone");
-    }
-
-    lines.push(parts.join(" "));
-  }
+    lines.push("");
+  });
 
   return lines.join("\n").trim();
 }
 
-export function upsertTaskScope(noteContent: string, tasks: Task[]): string {
+export function upsertTaskScope(noteContent: string, tasks: Task[], options: InsertOptions = { mode: "bottom" }): string {
   const taskBody = serializeTasksToMarkdown(tasks);
   const block = `${DATA_START_MARKER}\n${taskBody}\n${DATA_END_MARKER}`;
 
@@ -503,11 +546,17 @@ export function upsertTaskScope(noteContent: string, tasks: Task[]): string {
     const startIndex = noteContent.indexOf(scope.start);
     const endIndex = noteContent.indexOf(scope.end);
     if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+      if (options.mode === "heading") {
+        const before = noteContent.slice(0, startIndex).replace(/\s+$/, "");
+        const after = noteContent.slice(endIndex + scope.end.length).replace(/^\s+/, "");
+        const withoutOldScope = `${before}\n\n${after}`.trimEnd() + "\n";
+        return insertBlockByMode(withoutOldScope, block, options);
+      }
       const before = noteContent.slice(0, startIndex).replace(/\s+$/, "");
       const after = noteContent.slice(endIndex + scope.end.length).replace(/^\s+/, "");
       return `${before}\n\n${block}\n\n${after}`.trimEnd() + "\n";
     }
   }
 
-  return `${noteContent.replace(/\s*$/, "")}\n\n${block}\n`.trimStart();
+  return insertBlockByMode(noteContent, block, options);
 }

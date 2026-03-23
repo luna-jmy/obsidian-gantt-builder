@@ -1,6 +1,6 @@
 {
   "name": "obsidian-gantt-builder",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",

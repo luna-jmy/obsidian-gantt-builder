@@ -31,7 +31,8 @@ interface GanttBuilderSettings {
   excludeWeekends: boolean;
   openMode: OpenMode;
   insertMode: InsertMode;
-  targetHeading: string;
+  ganttTargetHeading: string;
+  taskTargetHeading: string;
 }
 
 interface GanttViewState extends Record<string, unknown> {
@@ -42,7 +43,8 @@ const DEFAULT_SETTINGS: GanttBuilderSettings = {
   excludeWeekends: true,
   openMode: "modal",
   insertMode: "bottom",
-  targetHeading: "项目分解",
+  ganttTargetHeading: "## 项目分解",
+  taskTargetHeading: "## 项目分解",
 };
 
 const createEmptyTask = (section = ""): Task => ({
@@ -66,14 +68,15 @@ class GanttBuilderEditor {
   private readonly rootEl: HTMLElement;
   private readonly previewComponent: Component;
   private readonly onSettingsChange: (
-    update: Partial<Pick<GanttBuilderSettings, "excludeWeekends" | "insertMode" | "targetHeading">>,
+    update: Partial<Pick<GanttBuilderSettings, "excludeWeekends" | "insertMode">>,
   ) => Promise<void>;
 
   private config: GanttConfig;
   private tasks: Task[] = [];
   private chartTitle = DEFAULT_CHART_TITLE;
   private insertMode: InsertMode;
-  private targetHeading: string;
+  private readonly ganttTargetHeading: string;
+  private readonly taskTargetHeading: string;
   private draggingTaskId: string | null = null;
 
   private readonly tableWrapEl: HTMLDivElement;
@@ -81,15 +84,14 @@ class GanttBuilderEditor {
   private readonly codePaneEl: HTMLDivElement;
   private readonly codeTextEl: HTMLTextAreaElement;
   private readonly titleInputEl: HTMLInputElement;
-  private readonly targetHeadingInputEl: HTMLInputElement;
 
   constructor(
     app: App,
     file: TFile,
     rootEl: HTMLElement,
-    settings: Pick<GanttBuilderSettings, "excludeWeekends" | "insertMode" | "targetHeading">,
+    settings: Pick<GanttBuilderSettings, "excludeWeekends" | "insertMode" | "ganttTargetHeading" | "taskTargetHeading">,
     onSettingsChange: (
-      update: Partial<Pick<GanttBuilderSettings, "excludeWeekends" | "insertMode" | "targetHeading">>,
+      update: Partial<Pick<GanttBuilderSettings, "excludeWeekends" | "insertMode">>,
     ) => Promise<void>,
   ) {
     this.app = app;
@@ -97,53 +99,13 @@ class GanttBuilderEditor {
     this.rootEl = rootEl;
     this.config = { excludeWeekends: settings.excludeWeekends };
     this.insertMode = settings.insertMode;
-    this.targetHeading = settings.targetHeading;
+    this.ganttTargetHeading = settings.ganttTargetHeading;
+    this.taskTargetHeading = settings.taskTargetHeading;
     this.onSettingsChange = onSettingsChange;
     this.previewComponent = new Component();
     this.previewComponent.load();
 
     const toolbarEl = this.rootEl.createDiv("gantt-builder-toolbar");
-
-    new Setting(toolbarEl)
-      .setName("排除周末")
-      .setDesc("启用后按工作日计算时长")
-      .addToggle((toggle) =>
-        toggle.setValue(this.config.excludeWeekends).onChange(async (value) => {
-          this.config.excludeWeekends = value;
-          await this.onSettingsChange({ excludeWeekends: value });
-          await this.refreshPreview();
-        }),
-      );
-
-    new Setting(toolbarEl)
-      .setName("甘特图写入位置")
-      .setDesc("选择写入到笔记中的位置")
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("cursor", "光标所在位置")
-          .addOption("bottom", "底部")
-          .addOption("heading", "特定标题下方")
-          .setValue(this.insertMode)
-          .onChange(async (value) => {
-            this.insertMode = value as InsertMode;
-            await this.onSettingsChange({ insertMode: this.insertMode });
-            this.updateTitleInputAvailability();
-            this.toggleHeadingInputVisibility();
-            await this.refreshPreview();
-          }),
-      );
-
-    const headingWrapEl = toolbarEl.createDiv("gantt-builder-heading-wrap");
-    headingWrapEl.createEl("label", { text: "目标标题（仅“特定标题下方”）" });
-    this.targetHeadingInputEl = headingWrapEl.createEl("input", {
-      type: "text",
-      value: this.targetHeading,
-      placeholder: "例如：项目分解",
-    });
-    this.targetHeadingInputEl.onchange = async () => {
-      this.targetHeading = this.targetHeadingInputEl.value.trim();
-      await this.onSettingsChange({ targetHeading: this.targetHeading });
-    };
 
     const titleWrapEl = toolbarEl.createDiv("gantt-builder-title-wrap");
     titleWrapEl.createEl("label", { text: "甘特图标题" });
@@ -224,7 +186,35 @@ class GanttBuilderEditor {
       attr: { readonly: "true" },
     });
 
-    this.toggleHeadingInputVisibility();
+    const bottomSettingsEl = this.rootEl.createDiv("gantt-builder-toolbar gantt-builder-bottom-settings");
+    new Setting(bottomSettingsEl)
+      .setName("排除周末")
+      .setDesc("启用后按工作日计算时长")
+      .addToggle((toggle) =>
+        toggle.setValue(this.config.excludeWeekends).onChange(async (value) => {
+          this.config.excludeWeekends = value;
+          await this.onSettingsChange({ excludeWeekends: value });
+          await this.refreshPreview();
+        }),
+      );
+
+    new Setting(bottomSettingsEl)
+      .setName("写入位置")
+      .setDesc("同时作用于甘特图和任务写入")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("cursor", "光标所在位置")
+          .addOption("bottom", "底部")
+          .addOption("heading", "特定标题下方")
+          .setValue(this.insertMode)
+          .onChange(async (value) => {
+            this.insertMode = value as InsertMode;
+            await this.onSettingsChange({ insertMode: this.insertMode });
+            this.updateTitleInputAvailability();
+            await this.refreshPreview();
+          }),
+      );
+
     this.updateTitleInputAvailability();
   }
 
@@ -246,12 +236,12 @@ class GanttBuilderEditor {
     this.codePaneEl.toggleClass("is-hidden", previewActive);
   }
 
-  private toggleHeadingInputVisibility(): void {
-    this.targetHeadingInputEl.parentElement?.toggleClass("is-hidden", this.insertMode !== "heading");
-  }
-
   private updateTitleInputAvailability(): void {
     this.titleInputEl.disabled = this.insertMode === "heading";
+  }
+
+  private isValidHeadingPattern(heading: string): boolean {
+    return /^(#{1,6})\s+\S.+$/.test(heading.trim());
   }
 
   private getEffectiveChartTitle(): string {
@@ -365,11 +355,11 @@ class GanttBuilderEditor {
       };
 
       const sectionCell = row.insertCell();
-      const sectionInput = sectionCell.createEl("input", {
-        type: "text",
-        value: task.section,
-        placeholder: "分组，如：执行阶段",
+      const sectionInput = sectionCell.createEl("textarea", {
+        cls: "gantt-builder-group-input",
+        attr: { rows: "2", placeholder: "分组，如：执行阶段" },
       });
+      sectionInput.value = task.section;
       sectionInput.onchange = async () => {
         task.section = sectionInput.value.trim();
         await this.refreshPreview();
@@ -413,14 +403,17 @@ class GanttBuilderEditor {
 
       const dateCell = row.insertCell();
       const dateStack = dateCell.createDiv("gantt-builder-date-stack");
-      dateStack.createDiv("gantt-builder-subtitle").setText("日期");
-      const startInput = dateStack.createEl("input", { type: "date", value: task.startDate });
+      const startRow = dateStack.createDiv("gantt-builder-inline-field");
+      startRow.createEl("span", { cls: "gantt-builder-inline-label", text: "从" });
+      const startInput = startRow.createEl("input", { type: "date", value: task.startDate });
       startInput.onchange = async () => {
         task.startDate = startInput.value.trim();
         this.renderTaskTable();
         await this.refreshPreview();
       };
-      const dueInput = dateStack.createEl("input", { type: "date", value: task.dueDate });
+      const dueRow = dateStack.createDiv("gantt-builder-inline-field");
+      dueRow.createEl("span", { cls: "gantt-builder-inline-label", text: "至" });
+      const dueInput = dueRow.createEl("input", { type: "date", value: task.dueDate });
       dueInput.onchange = async () => {
         task.dueDate = dueInput.value.trim();
         this.renderTaskTable();
@@ -433,8 +426,8 @@ class GanttBuilderEditor {
 
       const relationCell = row.insertCell();
       const relationStack = relationCell.createDiv("gantt-builder-relation-stack");
-      const idWrap = relationStack.createDiv("gantt-builder-id-cell");
-      idWrap.createDiv("gantt-builder-subtitle").setText("ID");
+      const idWrap = relationStack.createDiv("gantt-builder-id-cell gantt-builder-inline-field");
+      idWrap.createEl("span", { cls: "gantt-builder-inline-label", text: "ID" });
       const idInput = idWrap.createEl("input", { type: "text", value: task.id, placeholder: "可选" });
       idInput.onchange = async () => {
         task.id = idInput.value.trim();
@@ -451,8 +444,8 @@ class GanttBuilderEditor {
         await this.refreshPreview();
       };
 
-      const depWrap = relationStack.createDiv();
-      depWrap.createDiv("gantt-builder-subtitle").setText("依赖");
+      const depWrap = relationStack.createDiv("gantt-builder-inline-field");
+      depWrap.createEl("span", { cls: "gantt-builder-inline-label", text: "依赖" });
       const dependencySelect = depWrap.createEl("select");
       dependencySelect.addClass("gantt-builder-dependency-select");
       dependencySelect.createEl("option", { value: "", text: "无依赖" });
@@ -579,13 +572,30 @@ class GanttBuilderEditor {
   }
 
   private async saveTasksToNote(): Promise<void> {
+    if (this.insertMode === "heading" && !this.isValidHeadingPattern(this.taskTargetHeading)) {
+      new Notice("任务默认目标标题格式无效，请使用例如：## Project Plan");
+      return;
+    }
     const content = await this.app.vault.read(this.file);
-    const next = upsertTaskScope(content, this.tasks);
+    const cursorOffset = this.getCursorOffsetForCurrentFile();
+    const mode = this.insertMode === "cursor" && cursorOffset === undefined ? "bottom" : this.insertMode;
+    if (this.insertMode === "cursor" && cursorOffset === undefined) {
+      new Notice("未找到光标位置，已回退到底部写入。");
+    }
+    const next = upsertTaskScope(content, this.tasks, {
+      mode,
+      headingText: this.taskTargetHeading,
+      cursorOffset,
+    });
     await this.app.vault.modify(this.file, next);
     new Notice("任务已写入/更新到 data 范围。");
   }
 
   private async saveGanttToNote(): Promise<void> {
+    if (this.insertMode === "heading" && !this.isValidHeadingPattern(this.ganttTargetHeading)) {
+      new Notice("甘特图默认目标标题格式无效，请使用例如：## Project Plan");
+      return;
+    }
     const content = await this.app.vault.read(this.file);
     const effectiveTitle = this.getEffectiveChartTitle();
     const mermaidCode = generateMermaidCode(this.tasks, this.config, effectiveTitle);
@@ -596,7 +606,7 @@ class GanttBuilderEditor {
     }
     const next = upsertGanttArtifacts(content, mermaidCode, this.tasks, effectiveTitle, {
       mode,
-      headingText: this.targetHeading,
+      headingText: this.ganttTargetHeading,
       cursorOffset,
       useCustomTitle: this.insertMode !== "heading",
     });
@@ -627,7 +637,8 @@ class GanttBuilderModal extends Modal {
       {
         excludeWeekends: this.plugin.settings.excludeWeekends,
         insertMode: this.plugin.settings.insertMode,
-        targetHeading: this.plugin.settings.targetHeading,
+        ganttTargetHeading: this.plugin.settings.ganttTargetHeading,
+        taskTargetHeading: this.plugin.settings.taskTargetHeading,
       },
       async (update) => {
         Object.assign(this.plugin.settings, update);
@@ -708,7 +719,8 @@ class GanttBuilderWorkspaceView extends ItemView {
       {
         excludeWeekends: this.plugin.settings.excludeWeekends,
         insertMode: this.plugin.settings.insertMode,
-        targetHeading: this.plugin.settings.targetHeading,
+        ganttTargetHeading: this.plugin.settings.ganttTargetHeading,
+        taskTargetHeading: this.plugin.settings.taskTargetHeading,
       },
       async (update) => {
         Object.assign(this.plugin.settings, update);
@@ -752,7 +764,20 @@ export default class ObsidianGanttBuilderPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const loaded = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()) as GanttBuilderSettings & { targetHeading?: string };
+    if (!loaded.ganttTargetHeading && loaded.targetHeading) {
+      loaded.ganttTargetHeading = loaded.targetHeading;
+    }
+    if (!loaded.taskTargetHeading && loaded.targetHeading) {
+      loaded.taskTargetHeading = loaded.targetHeading;
+    }
+    if (loaded.ganttTargetHeading && !/^\s*#{1,6}\s+/.test(loaded.ganttTargetHeading)) {
+      loaded.ganttTargetHeading = `## ${loaded.ganttTargetHeading.trim()}`;
+    }
+    if (loaded.taskTargetHeading && !/^\s*#{1,6}\s+/.test(loaded.taskTargetHeading)) {
+      loaded.taskTargetHeading = `## ${loaded.taskTargetHeading.trim()}`;
+    }
+    this.settings = loaded;
   }
 
   async saveSettings(): Promise<void> {
@@ -826,7 +851,7 @@ class GanttBuilderSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("默认写入位置")
-      .setDesc("默认写入甘特图到笔记的方式")
+      .setDesc("同时作用于甘特图与任务写入")
       .addDropdown((dropdown) =>
         dropdown
           .addOption("cursor", "光标所在位置")
@@ -840,11 +865,31 @@ class GanttBuilderSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("默认目标标题")
-      .setDesc("当写入方式为“特定标题下方”时使用")
+      .setName("甘特图默认目标标题")
+      .setDesc("必须包含标题标识符，例如：## Project Plan")
       .addText((text) =>
-        text.setValue(this.plugin.settings.targetHeading).onChange(async (value) => {
-          this.plugin.settings.targetHeading = value.trim();
+        text.setValue(this.plugin.settings.ganttTargetHeading).onChange(async (value) => {
+          const next = value.trim();
+          if (next && !/^(#{1,6})\s+\S.+$/.test(next)) {
+            new Notice("标题格式错误：请使用例如 ## Project Plan");
+            return;
+          }
+          this.plugin.settings.ganttTargetHeading = next;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("任务默认目标标题")
+      .setDesc("必须包含标题标识符，例如：## Project Plan")
+      .addText((text) =>
+        text.setValue(this.plugin.settings.taskTargetHeading).onChange(async (value) => {
+          const next = value.trim();
+          if (next && !/^(#{1,6})\s+\S.+$/.test(next)) {
+            new Notice("标题格式错误：请使用例如 ## Project Plan");
+            return;
+          }
+          this.plugin.settings.taskTargetHeading = next;
           await this.plugin.saveSettings();
         }),
       );
