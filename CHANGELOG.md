@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-03-23
+
+### Added
+- Added export buttons for `SVG` and `PNG` images from the rendered Gantt preview.
+
+### Changed
+- `%% gantt-builder:data:start %% ... %% gantt-builder:data:end %%` is now treated as task parsing scope only.
+- Gantt save now only writes/updates the `%% gantt-builder:start %% ... %% gantt-builder:end %%` block.
+- Gantt overwrite update now prioritizes existing `start/end` marker block replacement.
+
+### Fixed
+- Fixed parsing failures for start date, due date, ID, and dependency by using robust Unicode-aware emoji matching.
+- Fixed out-of-scope task parsing when `data start/end` markers exist.
+- Fixed dependency task duration calculation to align with QuickAdd script behavior.
+
 ## [0.1.2] - 2026-03-23
 
 ### Added

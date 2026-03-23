@@ -1,17 +1,17 @@
 import { GanttConfig, Task } from "../types";
 
 const DATE_PATTERN = "\\d{4}-\\d{2}-\\d{2}";
-const startDateRegex = new RegExp(`(?:🛫|\\[start::\\s*)(${DATE_PATTERN})\\]?`);
-const scheduledDateRegex = new RegExp(`(?:⏳|\\[scheduled::\\s*)(${DATE_PATTERN})\\]?`);
-const dueDateRegex = new RegExp(`(?:📅|\\[due::\\s*)(${DATE_PATTERN})\\]?`);
-const doneDateRegex = new RegExp(`(?:✅|\\[completion::\\s*)(${DATE_PATTERN})\\]?`);
-const createdDateRegex = new RegExp(`(?:➕|\\[created::\\s*)(${DATE_PATTERN})\\]?`);
-const cancelledDateRegex = new RegExp(`(?:❌|\\[cancelled::\\s*)(${DATE_PATTERN})\\]?`);
-const idRegex = /(?:🆔|\[id::\s*)([a-zA-Z0-9_-]+)\]?/;
-const dependencyRegex = /(?:⛔|\[(?:dependsOn|depends on|depends)::\s*)([a-zA-Z0-9_-]+)\]?/i;
+const startDateRegex = new RegExp(`(?:\\u{1F6EB}\\uFE0F?|\\[start::\\s*)(${DATE_PATTERN})\\]?`, "u");
+const scheduledDateRegex = new RegExp(`(?:\\u{23F3}\\uFE0F?|\\[scheduled::\\s*)(${DATE_PATTERN})\\]?`, "u");
+const dueDateRegex = new RegExp(`(?:\\u{1F4C5}\\uFE0F?|\\[due::\\s*)(${DATE_PATTERN})\\]?`, "u");
+const doneDateRegex = new RegExp(`(?:\\u{2705}\\uFE0F?|\\[completion::\\s*)(${DATE_PATTERN})\\]?`, "u");
+const createdDateRegex = new RegExp(`(?:\\u{2795}\\uFE0F?|\\[created::\\s*)(${DATE_PATTERN})\\]?`, "u");
+const cancelledDateRegex = new RegExp(`(?:\\u{274C}\\uFE0F?|\\[cancelled::\\s*)(${DATE_PATTERN})\\]?`, "u");
+const idRegex = new RegExp(`(?:\\u{1F194}\\uFE0F?|\\[id::\\s*)([a-zA-Z0-9_-]+)\\]?`, "u");
+const dependencyRegex = new RegExp(`(?:\\u{26D4}\\uFE0F?|\\[(?:dependsOn|depends on|depends)::\\s*)([a-zA-Z0-9_-]+)\\]?`, "iu");
 const ownerRegex = /\[owner::\s*([^\]]+)\]/;
-const milestoneRegex = /#milestone|🚩/i;
-const criticalRegex = /#crit|#critical|🔺/i;
+const milestoneRegex = new RegExp(`#milestone|\\u{1F6A9}\\uFE0F?`, "iu");
+const criticalRegex = new RegExp(`#crit|#critical|\\u{1F53A}\\uFE0F?`, "iu");
 
 const DATA_START_MARKER = "%% gantt-builder:data:start %%";
 const DATA_END_MARKER = "%% gantt-builder:data:end %%";
@@ -54,10 +54,7 @@ const cleanName = (name: string): string =>
     .replace(/\s+/g, " ")
     .trim();
 
-function sanitizeName(name: string): string {
-  return name.replace(/[:#]/g, "").trim();
-}
-
+const sanitizeName = (name: string): string => name.replace(/[:#]/g, "").trim();
 const formatDate = (date: Date): string => date.toISOString().slice(0, 10);
 
 const addDays = (dateStr: string, days: number): string => {
@@ -96,9 +93,10 @@ export function parseTasksFromNote(markdown: string): Task[] {
     const parsedStart = normalizeDate(raw.match(startDateRegex)?.[1] ?? "");
     const parsedScheduled = normalizeDate(raw.match(scheduledDateRegex)?.[1] ?? "");
     const parsedDue = normalizeDate(raw.match(dueDateRegex)?.[1] ?? "");
-    const parsedTask: Task = {
+
+    const task: Task = {
       internalId: crypto.randomUUID(),
-      name: cleanName(raw),
+      name: cleanName(raw) || "Untitled Task",
       project: currentProject,
       section: currentSection,
       completed: taskMatch[1].toLowerCase() === "x",
@@ -111,16 +109,13 @@ export function parseTasksFromNote(markdown: string): Task[] {
       isHighPriority: criticalRegex.test(raw),
     };
 
-    if (!parsedTask.name) {
-      parsedTask.name = "Untitled Task";
-    }
-    tasks.push(parsedTask);
+    tasks.push(task);
   }
 
   return tasks;
 }
 
-const RESERVED_ATTRS = new Set(["crit", "milestone", "done", "active", "today"]);
+const RESERVED_ATTRS = new Set(["crit", "milestone", "done", "active"]);
 
 function parseTaskLineFromMermaid(line: string, section: string, index: number): Task | null {
   const match = line.match(/^\s*([^:]+?)\s*:\s*(.+)\s*$/);
@@ -129,7 +124,7 @@ function parseTaskLineFromMermaid(line: string, section: string, index: number):
   }
 
   const name = match[1].trim();
-  const attrs = match[2].split(",").map((item) => item.trim()).filter(Boolean);
+  const attrs = match[2].split(",").map((part) => part.trim()).filter(Boolean);
 
   let completed = false;
   let isMilestone = false;
@@ -157,12 +152,16 @@ function parseTaskLineFromMermaid(line: string, section: string, index: number):
       continue;
     }
     if (/^\d{4}-\d{2}-\d{2}$/.test(token)) {
-      startDate = token;
+      if (!startDate) {
+        startDate = token;
+      } else if (!dueDate) {
+        dueDate = token;
+      }
       continue;
     }
     if (/^\d+d$/i.test(token)) {
       const durationDays = Math.max(1, Number.parseInt(token, 10));
-      if (startDate) {
+      if (startDate && !dueDate) {
         dueDate = addDays(startDate, durationDays - 1);
       }
       continue;
@@ -173,7 +172,7 @@ function parseTaskLineFromMermaid(line: string, section: string, index: number):
   }
 
   if (isMilestone && !dueDate) {
-    dueDate = startDate || "";
+    dueDate = startDate;
   }
 
   return {
@@ -222,65 +221,92 @@ function parseTasksFromGanttBlock(noteContent: string): PersistedGanttData | nul
       currentSection = sectionMatch[1].trim();
       return;
     }
-
     const task = parseTaskLineFromMermaid(line, currentSection, index);
     if (task) {
       tasks.push(task);
     }
   });
 
-  if (!tasks.length) {
-    return null;
-  }
-
-  return { chartTitle, tasks };
+  return tasks.length ? { chartTitle, tasks } : null;
 }
 
-function calculateWorkingDays(startDate: string, endDate: string): number {
+const calculateWorkingDays = (startDate: string, endDate: string): number => {
   if (!startDate || !endDate) {
     return 1;
   }
 
   const start = new Date(startDate);
   const end = new Date(endDate);
-  const direction = start <= end ? 1 : -1;
-  let current = new Date(start);
-  let workingDays = 0;
+  let current = start <= end ? new Date(start) : new Date(end);
+  const final = start <= end ? new Date(end) : new Date(start);
+  let days = 0;
 
-  while ((direction === 1 && current <= end) || (direction === -1 && current >= end)) {
-    const day = current.getDay();
-    if (day !== 0 && day !== 6) {
-      workingDays += 1;
+  while (current <= final) {
+    const dow = current.getDay();
+    if (dow !== 0 && dow !== 6) {
+      days += 1;
     }
-    current.setDate(current.getDate() + direction);
+    current.setDate(current.getDate() + 1);
   }
-
-  return Math.max(1, workingDays);
-}
+  return Math.max(1, days);
+};
 
 function calculateDuration(task: Task, excludeWeekends: boolean): string {
   if (task.isMilestone) {
     return "0d";
   }
+  if (!task.startDate || !task.dueDate) {
+    return "1d";
+  }
+  if (excludeWeekends) {
+    return `${calculateWorkingDays(task.startDate, task.dueDate)}d`;
+  }
+  const start = new Date(task.startDate);
+  const end = new Date(task.dueDate);
+  const diff = Math.floor(Math.abs(end.getTime() - start.getTime()) / 86400000) + 1;
+  return `${Math.max(1, diff)}d`;
+}
 
-  if (task.startDate && task.dueDate) {
-    if (excludeWeekends) {
-      return `${calculateWorkingDays(task.startDate, task.dueDate)}d`;
-    }
-
-    const start = new Date(task.startDate);
-    const end = new Date(task.dueDate);
-    const diff = Math.floor(Math.abs(end.getTime() - start.getTime()) / 86400000) + 1;
-    return `${Math.max(1, diff)}d`;
+function calculateDependencyDuration(currentTaskDueDate: string, dependencyTask: Task | undefined, excludeWeekends: boolean): string {
+  if (!currentTaskDueDate || !dependencyTask) {
+    return "1d";
   }
 
-  return "1d";
+  let dependencyEndDate = dependencyTask.dueDate;
+  if (!dependencyEndDate) {
+    if (dependencyTask.startDate) {
+      dependencyEndDate = addDays(dependencyTask.startDate, 1);
+    } else {
+      return "1d";
+    }
+  }
+
+  if (excludeWeekends) {
+    const depEnd = new Date(dependencyEndDate);
+    const nextStart = new Date(depEnd);
+    nextStart.setDate(nextStart.getDate() + 1);
+    while (nextStart.getDay() === 0 || nextStart.getDay() === 6) {
+      nextStart.setDate(nextStart.getDate() + 1);
+    }
+    return `${calculateWorkingDays(formatDate(nextStart), currentTaskDueDate)}d`;
+  }
+
+  const currentDue = new Date(currentTaskDueDate);
+  const depEnd = new Date(dependencyEndDate);
+  const diff = Math.ceil((currentDue.getTime() - depEnd.getTime()) / 86400000);
+  return `${Math.max(1, diff)}d`;
 }
 
 export function generateMermaidCode(tasks: Task[], config: GanttConfig, chartTitle = DEFAULT_CHART_TITLE): string {
   const safeTitle = sanitizeName(chartTitle) || DEFAULT_CHART_TITLE;
+  const lines: string[] = ["gantt", `    title ${safeTitle}`, "    dateFormat YYYY-MM-DD", "    axisFormat %m/%d", "    todayMarker on"];
+  if (config.excludeWeekends) {
+    lines.push("    excludes weekends");
+  }
+  lines.push("");
+
   if (!tasks.length) {
-    return `gantt\n    title ${safeTitle}\n    dateFormat YYYY-MM-DD`;
+    return lines.join("\n");
   }
 
   const sections = new Map<string, Task[]>();
@@ -292,19 +318,12 @@ export function generateMermaidCode(tasks: Task[], config: GanttConfig, chartTit
     sections.get(sectionName)?.push(task);
   }
 
-  const lines: string[] = [
-    "gantt",
-    `    title ${safeTitle}`,
-    "    dateFormat YYYY-MM-DD",
-    "    axisFormat %m/%d",
-    "    todayMarker on",
-  ];
-
-  if (config.excludeWeekends) {
-    lines.push("    excludes weekends");
+  const globalTaskMap = new Map<string, Task>();
+  for (const task of tasks) {
+    if (task.id) {
+      globalTaskMap.set(task.id, task);
+    }
   }
-
-  lines.push("");
 
   sections.forEach((sectionTasks, sectionName) => {
     lines.push(`    section ${sanitizeName(sectionName) || "Tasks"}`);
@@ -317,21 +336,32 @@ export function generateMermaidCode(tasks: Task[], config: GanttConfig, chartTit
         attrs.push("milestone");
       }
       attrs.push(task.completed ? "done" : "active");
+
       if (task.id) {
         attrs.push(task.id);
       }
 
       if (task.dependency) {
         attrs.push(`after ${task.dependency}`);
-      } else if (task.startDate) {
+        if (task.dueDate) {
+          attrs.push(calculateDependencyDuration(task.dueDate, globalTaskMap.get(task.dependency), config.excludeWeekends));
+        } else {
+          attrs.push("1d");
+        }
+      } else if (task.isMilestone) {
+        attrs.push(task.dueDate || task.startDate || formatDate(new Date()));
+        attrs.push("0d");
+      } else if (task.startDate && task.dueDate) {
         attrs.push(task.startDate);
+        attrs.push(calculateDuration(task, config.excludeWeekends));
       } else if (task.dueDate) {
         attrs.push(task.dueDate);
+        attrs.push("1d");
       } else {
-        attrs.push("today");
+        attrs.push(formatDate(new Date()));
+        attrs.push("1d");
       }
 
-      attrs.push(calculateDuration(task, config.excludeWeekends));
       lines.push(`    ${sanitizeName(task.name) || "Untitled Task"} :${attrs.join(", ")}`);
     }
     lines.push("");
@@ -340,121 +370,42 @@ export function generateMermaidCode(tasks: Task[], config: GanttConfig, chartTit
   return lines.join("\n").trimEnd();
 }
 
-export function toMermaidBlock(mermaidCode: string): string {
-  return `\`\`\`mermaid\n${mermaidCode}\n\`\`\``;
-}
+export const toMermaidBlock = (mermaidCode: string): string => `\`\`\`mermaid\n${mermaidCode}\n\`\`\``;
 
 export function loadPersistedGanttData(noteContent: string): PersistedGanttData | null {
+  const ganttData = parseTasksFromGanttBlock(noteContent);
+  const defaultTitle = ganttData?.chartTitle ?? DEFAULT_CHART_TITLE;
+
   const startIndex = noteContent.indexOf(DATA_START_MARKER);
   const endIndex = noteContent.indexOf(DATA_END_MARKER);
-  if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
-    return parseTasksFromGanttBlock(noteContent);
-  }
-
-  const rawBlock = noteContent.slice(startIndex + DATA_START_MARKER.length, endIndex);
-  const codeFenceMatch = rawBlock.match(/```json\s*([\s\S]*?)\s*```/i);
-  const jsonText = codeFenceMatch?.[1]?.trim() ?? rawBlock.trim();
-
-  if (!jsonText) {
-    return parseTasksFromGanttBlock(noteContent);
-  }
-
-  try {
-    const parsed = JSON.parse(jsonText);
-    const normalizeTasks = (rawTasks: unknown): Task[] => {
-      if (!Array.isArray(rawTasks)) {
-        return [];
-      }
-      return rawTasks
-        .filter((item) => typeof item === "object" && item !== null)
-        .map((item) => {
-          const raw = item as Partial<Task>;
-          return {
-            internalId: raw.internalId || crypto.randomUUID(),
-            name: raw.name || "Untitled Task",
-            project: raw.project || "Current Note",
-            section: raw.section || "",
-            completed: Boolean(raw.completed),
-            startDate: raw.startDate || "",
-            dueDate: raw.dueDate || "",
-            owner: raw.owner || "",
-            id: raw.id || "",
-            dependency: raw.dependency || "",
-            isMilestone: Boolean(raw.isMilestone),
-            isHighPriority: Boolean(raw.isHighPriority),
-          };
-        });
-    };
-
-    if (Array.isArray(parsed)) {
-      return {
-        chartTitle: DEFAULT_CHART_TITLE,
-        tasks: normalizeTasks(parsed),
-      };
-    }
-
-    if (typeof parsed !== "object" || parsed === null) {
-      return null;
-    }
-
-    const data = parsed as Partial<PersistedGanttData>;
+  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+    const scopedContent = noteContent.slice(startIndex + DATA_START_MARKER.length, endIndex);
     return {
-      chartTitle: typeof data.chartTitle === "string" && data.chartTitle.trim() ? data.chartTitle.trim() : DEFAULT_CHART_TITLE,
-      tasks: normalizeTasks(data.tasks),
+      chartTitle: defaultTitle,
+      tasks: parseTasksFromNote(scopedContent),
     };
-  } catch {
-    return parseTasksFromGanttBlock(noteContent);
-  }
-}
-
-function buildArtifactsBlock(mermaidCode: string, tasks: Task[], chartTitle: string): string {
-  const payload: PersistedGanttData = {
-    chartTitle: chartTitle.trim() || DEFAULT_CHART_TITLE,
-    tasks,
-  };
-  const dataBlock = `\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\``;
-  const mermaidBlock = toMermaidBlock(mermaidCode);
-
-  return [
-    DATA_START_MARKER,
-    dataBlock,
-    DATA_END_MARKER,
-    "",
-    GANTT_START_MARKER,
-    mermaidBlock,
-    GANTT_END_MARKER,
-  ].join("\n");
-}
-
-function replaceExistingArtifacts(noteContent: string, artifactsBlock: string): string | null {
-  const startIndex = noteContent.indexOf(DATA_START_MARKER);
-  const dataEndIndex = noteContent.indexOf(DATA_END_MARKER);
-  const ganttStartIndex = noteContent.indexOf(GANTT_START_MARKER);
-  const ganttEndIndex = noteContent.indexOf(GANTT_END_MARKER);
-
-  if (
-    startIndex !== -1 &&
-    dataEndIndex !== -1 &&
-    ganttStartIndex !== -1 &&
-    ganttEndIndex !== -1 &&
-    startIndex < dataEndIndex &&
-    dataEndIndex < ganttStartIndex &&
-    ganttStartIndex < ganttEndIndex
-  ) {
-    const before = noteContent.slice(0, startIndex).replace(/\s+$/, "");
-    const after = noteContent.slice(ganttEndIndex + GANTT_END_MARKER.length).replace(/^\s+/, "");
-    return `${before}\n\n${artifactsBlock}\n\n${after}`.trimEnd() + "\n";
   }
 
-  const oldStart = noteContent.indexOf(GANTT_START_MARKER);
-  const oldEnd = noteContent.indexOf(GANTT_END_MARKER);
-  if (oldStart !== -1 && oldEnd !== -1 && oldStart < oldEnd) {
-    const before = noteContent.slice(0, oldStart).replace(/\s+$/, "");
-    const after = noteContent.slice(oldEnd + GANTT_END_MARKER.length).replace(/^\s+/, "");
-    return `${before}\n\n${artifactsBlock}\n\n${after}`.trimEnd() + "\n";
+  if (ganttData) {
+    return ganttData;
   }
 
   return null;
+}
+
+function buildGanttBlock(mermaidCode: string): string {
+  return [GANTT_START_MARKER, toMermaidBlock(mermaidCode), GANTT_END_MARKER].join("\n");
+}
+
+function replaceExistingGantt(noteContent: string, ganttBlock: string): string | null {
+  const startIndex = noteContent.indexOf(GANTT_START_MARKER);
+  const endIndex = noteContent.indexOf(GANTT_END_MARKER);
+  if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
+    return null;
+  }
+  const before = noteContent.slice(0, startIndex).replace(/\s+$/, "");
+  const after = noteContent.slice(endIndex + GANTT_END_MARKER.length).replace(/^\s+/, "");
+  return `${before}\n\n${ganttBlock}\n\n${after}`.trimEnd() + "\n";
 }
 
 function insertAfterHeading(noteContent: string, headingText: string, block: string): string {
@@ -477,26 +428,25 @@ function insertAfterHeading(noteContent: string, headingText: string, block: str
 export function upsertGanttArtifacts(
   noteContent: string,
   mermaidCode: string,
-  tasks: Task[],
-  chartTitle = DEFAULT_CHART_TITLE,
+  _tasks: Task[],
+  _chartTitle = DEFAULT_CHART_TITLE,
   options: InsertOptions = { mode: "bottom", useCustomTitle: true },
 ): string {
-  const effectiveTitle = options.useCustomTitle === false ? DEFAULT_CHART_TITLE : chartTitle;
-  const artifactsBlock = buildArtifactsBlock(mermaidCode, tasks, effectiveTitle);
+  const ganttBlock = buildGanttBlock(mermaidCode);
 
-  const replaced = replaceExistingArtifacts(noteContent, artifactsBlock);
+  const replaced = replaceExistingGantt(noteContent, ganttBlock);
   if (replaced) {
     return replaced;
   }
 
   if (options.mode === "cursor" && typeof options.cursorOffset === "number") {
     const offset = Math.max(0, Math.min(options.cursorOffset, noteContent.length));
-    return `${noteContent.slice(0, offset)}\n${artifactsBlock}\n${noteContent.slice(offset)}`.trimEnd() + "\n";
+    return `${noteContent.slice(0, offset)}\n${ganttBlock}\n${noteContent.slice(offset)}`.trimEnd() + "\n";
   }
 
   if (options.mode === "heading") {
-    return insertAfterHeading(noteContent, options.headingText ?? "", artifactsBlock);
+    return insertAfterHeading(noteContent, options.headingText ?? "", ganttBlock);
   }
 
-  return `${noteContent.replace(/\s*$/, "")}\n\n${artifactsBlock}\n`.trimStart();
+  return `${noteContent.replace(/\s*$/, "")}\n\n${ganttBlock}\n`.trimStart();
 }

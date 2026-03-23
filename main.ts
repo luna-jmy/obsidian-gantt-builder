@@ -113,28 +113,30 @@ class GanttBuilderEditor {
         }),
       );
 
-    const insertSetting = new Setting(toolbarEl).setName("甘特图写入位置").setDesc("选择写入到笔记中的位置");
-    insertSetting.addDropdown((dropdown) =>
-      dropdown
-        .addOption("cursor", "光标所在位置")
-        .addOption("bottom", "底部")
-        .addOption("heading", "特定标题下方")
-        .setValue(this.insertMode)
-        .onChange(async (value) => {
-          this.insertMode = value as InsertMode;
-          await this.onSettingsChange({ insertMode: this.insertMode });
-          this.updateTitleInputAvailability();
-          this.toggleHeadingInputVisibility();
-          await this.refreshPreview();
-        }),
-    );
+    new Setting(toolbarEl)
+      .setName("甘特图写入位置")
+      .setDesc("选择写入到笔记中的位置")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("cursor", "光标所在位置")
+          .addOption("bottom", "底部")
+          .addOption("heading", "特定标题下方")
+          .setValue(this.insertMode)
+          .onChange(async (value) => {
+            this.insertMode = value as InsertMode;
+            await this.onSettingsChange({ insertMode: this.insertMode });
+            this.updateTitleInputAvailability();
+            this.toggleHeadingInputVisibility();
+            await this.refreshPreview();
+          }),
+      );
 
     const headingWrapEl = toolbarEl.createDiv("gantt-builder-heading-wrap");
     headingWrapEl.createEl("label", { text: "目标标题（仅“特定标题下方”）" });
     this.targetHeadingInputEl = headingWrapEl.createEl("input", {
       type: "text",
       value: this.targetHeading,
-      placeholder: "例如：计划",
+      placeholder: "例如：项目分解",
     });
     this.targetHeadingInputEl.onchange = async () => {
       this.targetHeading = this.targetHeadingInputEl.value.trim();
@@ -153,9 +155,10 @@ class GanttBuilderEditor {
       this.titleInputEl.value = this.chartTitle;
       await this.refreshPreview();
     };
-    titleWrapEl.createEl("small", { text: "提示：写入位置为“特定标题下方”时，标题固定为默认值。" });
+    titleWrapEl.createEl("small", { text: "当写入位置为“特定标题下方”时，标题固定为默认值。" });
 
     const topButtonsEl = toolbarEl.createDiv("gantt-builder-button-row");
+
     const reloadButton = topButtonsEl.createEl("button", { text: "从笔记重载" });
     reloadButton.onclick = async () => {
       await this.reloadTasks();
@@ -169,6 +172,16 @@ class GanttBuilderEditor {
       const code = generateMermaidCode(this.tasks, this.config, this.getEffectiveChartTitle());
       await navigator.clipboard.writeText(toMermaidBlock(code));
       new Notice("Mermaid 代码已复制到剪贴板");
+    };
+
+    const exportSvgButton = topButtonsEl.createEl("button", { text: "导出 SVG" });
+    exportSvgButton.onclick = async () => {
+      await this.exportSvg();
+    };
+
+    const exportPngButton = topButtonsEl.createEl("button", { text: "导出 PNG" });
+    exportPngButton.onclick = async () => {
+      await this.exportPng();
     };
 
     const saveButton = topButtonsEl.createEl("button", { text: "写入/更新甘特图", cls: "mod-cta" });
@@ -225,13 +238,11 @@ class GanttBuilderEditor {
   }
 
   private toggleHeadingInputVisibility(): void {
-    const shouldShow = this.insertMode === "heading";
-    this.targetHeadingInputEl.parentElement?.toggleClass("is-hidden", !shouldShow);
+    this.targetHeadingInputEl.parentElement?.toggleClass("is-hidden", this.insertMode !== "heading");
   }
 
   private updateTitleInputAvailability(): void {
-    const disabled = this.insertMode === "heading";
-    this.titleInputEl.disabled = disabled;
+    this.titleInputEl.disabled = this.insertMode === "heading";
   }
 
   private getEffectiveChartTitle(): string {
@@ -241,19 +252,19 @@ class GanttBuilderEditor {
   private async reloadTasks(): Promise<void> {
     const content = await this.app.vault.read(this.file);
     const persisted = loadPersistedGanttData(content);
-    if (persisted && persisted.tasks.length > 0) {
-      this.tasks = persisted.tasks;
+    if (persisted) {
+      this.tasks = persisted.tasks.length ? persisted.tasks : [createEmptyTask()];
       this.chartTitle = persisted.chartTitle || DEFAULT_CHART_TITLE;
       this.titleInputEl.value = this.chartTitle;
       return;
     }
 
     this.tasks = parseTasksFromNote(content);
-    this.chartTitle = DEFAULT_CHART_TITLE;
-    this.titleInputEl.value = this.chartTitle;
     if (!this.tasks.length) {
       this.tasks = [createEmptyTask()];
     }
+    this.chartTitle = DEFAULT_CHART_TITLE;
+    this.titleInputEl.value = this.chartTitle;
   }
 
   private generateRandomTaskId(): string {
@@ -262,17 +273,11 @@ class GanttBuilderEditor {
 
   private getDependencyOptions(currentTask: Task): Array<{ value: string; label: string }> {
     const options = this.tasks
-      .filter((task) => task.internalId !== currentTask.internalId && task.id.trim().length > 0)
-      .map((task) => ({
-        value: task.id.trim(),
-        label: `${task.id.trim()} · ${task.name || "未命名任务"}`,
-      }));
+      .filter((task) => task.internalId !== currentTask.internalId && task.id.trim())
+      .map((task) => ({ value: task.id.trim(), label: `${task.id.trim()} · ${task.name || "未命名任务"}` }));
 
     if (currentTask.dependency && !options.some((item) => item.value === currentTask.dependency)) {
-      options.unshift({
-        value: currentTask.dependency,
-        label: `${currentTask.dependency} · (当前依赖)`,
-      });
+      options.unshift({ value: currentTask.dependency, label: `${currentTask.dependency} · (当前依赖)` });
     }
 
     return options;
@@ -396,11 +401,7 @@ class GanttBuilderEditor {
     input.onchange = async () => onChange(input.value.trim());
   }
 
-  private bindDateInputCell(
-    row: HTMLTableRowElement,
-    value: string,
-    onChange: (value: string) => Promise<void>,
-  ): void {
+  private bindDateInputCell(row: HTMLTableRowElement, value: string, onChange: (value: string) => Promise<void>): void {
     const cell = row.insertCell();
     const input = cell.createEl("input", { type: "date", value });
     input.onchange = async () => onChange(input.value.trim());
@@ -431,17 +432,97 @@ class GanttBuilderEditor {
     return offset + cursor.ch;
   }
 
+  private getRenderedSvgElement(): SVGSVGElement | null {
+    return this.previewPaneEl.querySelector("svg");
+  }
+
+  private async saveBinaryToVault(filename: string, bytes: Uint8Array): Promise<string> {
+    const attachmentFolder = ((this.app.vault as unknown as { getConfig?: (key: string) => string }).getConfig?.("attachmentFolderPath")) || "";
+    const normalizedFolder = attachmentFolder?.trim();
+    const path = normalizedFolder ? `${normalizedFolder}/${filename}` : filename;
+    await this.app.vault.createBinary(path, bytes);
+    return path;
+  }
+
+  private async exportSvg(): Promise<void> {
+    const svgElement = this.getRenderedSvgElement();
+    if (!svgElement) {
+      new Notice("未找到可导出的甘特图，请先点击预览。");
+      return;
+    }
+
+    const cloned = svgElement.cloneNode(true) as SVGSVGElement;
+    cloned.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    const raw = new XMLSerializer().serializeToString(cloned);
+    const content = `<?xml version="1.0" encoding="UTF-8"?>\n${raw}`;
+    const bytes = new TextEncoder().encode(content);
+    const savedPath = await this.saveBinaryToVault(`${this.file.basename}-gantt-${Date.now()}.svg`, bytes);
+    new Notice(`SVG 已导出：${savedPath}`);
+  }
+
+  private async exportPng(): Promise<void> {
+    const svgElement = this.getRenderedSvgElement();
+    if (!svgElement) {
+      new Notice("未找到可导出的甘特图，请先点击预览。");
+      return;
+    }
+
+    const cloned = svgElement.cloneNode(true) as SVGSVGElement;
+    cloned.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+
+    const viewBox = cloned.getAttribute("viewBox");
+    let width = 1200;
+    let height = 600;
+    if (viewBox) {
+      const parts = viewBox.split(/[,\s]+/).filter(Boolean);
+      if (parts.length >= 4) {
+        width = Math.max(1, Math.round(Number(parts[2])));
+        height = Math.max(1, Math.round(Number(parts[3])));
+      }
+    }
+
+    const svgRaw = new XMLSerializer().serializeToString(cloned);
+    const svgBlob = new Blob([svgRaw], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("无法加载 SVG 用于 PNG 导出"));
+        img.src = url;
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width * 2;
+      canvas.height = height * 2;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        throw new Error("无法创建 Canvas 上下文");
+      }
+
+      ctx.scale(2, 2);
+      ctx.drawImage(image, 0, 0, width, height);
+
+      const dataUrl = canvas.toDataURL("image/png");
+      const base64 = dataUrl.split(",")[1];
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      const savedPath = await this.saveBinaryToVault(`${this.file.basename}-gantt-${Date.now()}.png`, bytes);
+      new Notice(`PNG 已导出：${savedPath}`);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
   private async refreshPreview(): Promise<void> {
     const mermaidCode = generateMermaidCode(this.tasks, this.config, this.getEffectiveChartTitle());
     this.codeTextEl.value = toMermaidBlock(mermaidCode);
     this.previewPaneEl.empty();
-    await MarkdownRenderer.render(
-      this.app,
-      `${toMermaidBlock(mermaidCode)}\n`,
-      this.previewPaneEl,
-      this.file.path,
-      this.previewComponent,
-    );
+    await MarkdownRenderer.render(this.app, `${toMermaidBlock(mermaidCode)}\n`, this.previewPaneEl, this.file.path, this.previewComponent);
   }
 
   private async saveArtifactsToNote(): Promise<void> {
@@ -449,18 +530,19 @@ class GanttBuilderEditor {
     const effectiveTitle = this.getEffectiveChartTitle();
     const mermaidCode = generateMermaidCode(this.tasks, this.config, effectiveTitle);
     const cursorOffset = this.getCursorOffsetForCurrentFile();
+    const mode = this.insertMode === "cursor" && cursorOffset === undefined ? "bottom" : this.insertMode;
     if (this.insertMode === "cursor" && cursorOffset === undefined) {
       new Notice("未找到当前笔记光标位置，已回退到底部写入。");
     }
 
     const next = upsertGanttArtifacts(current, mermaidCode, this.tasks, effectiveTitle, {
-      mode: this.insertMode === "cursor" && cursorOffset === undefined ? "bottom" : this.insertMode,
+      mode,
       headingText: this.targetHeading,
       cursorOffset,
       useCustomTitle: this.insertMode !== "heading",
     });
     await this.app.vault.modify(this.file, next);
-    new Notice("已写入甘特图与可编辑任务数据");
+    new Notice("甘特图已写入笔记。");
   }
 }
 
@@ -528,7 +610,7 @@ class GanttBuilderWorkspaceView extends ItemView {
   async setState(state: GanttViewState): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(state.filePath);
     if (!(file instanceof TFile)) {
-      new Notice("未找到目标笔记");
+      new Notice("未找到目标笔记。");
       return;
     }
     this.file = file;
@@ -585,7 +667,6 @@ export default class ObsidianGanttBuilderPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
-
     this.registerView(VIEW_TYPE_GANTT_BUILDER, (leaf) => new GanttBuilderWorkspaceView(leaf, this));
 
     this.addRibbonIcon("calendar-clock", "打开当前笔记 Gantt Builder", () => {
@@ -626,7 +707,7 @@ export default class ObsidianGanttBuilderPlugin extends Plugin {
     const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
     const file = markdownView?.file;
     if (!file) {
-      new Notice("请先打开一条 Markdown 笔记");
+      new Notice("请先打开一条 Markdown 笔记。");
       return;
     }
 
@@ -635,12 +716,9 @@ export default class ObsidianGanttBuilderPlugin extends Plugin {
       return;
     }
 
-    const leaf =
-      this.settings.openMode === "sidebar"
-        ? this.app.workspace.getRightLeaf(false)
-        : this.app.workspace.getLeaf("tab");
+    const leaf = this.settings.openMode === "sidebar" ? this.app.workspace.getRightLeaf(false) : this.app.workspace.getLeaf("tab");
     if (!leaf) {
-      new Notice("无法创建目标视图，请重试");
+      new Notice("无法创建目标视图，请重试。");
       return;
     }
 
