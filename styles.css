@@ -42,8 +42,24 @@
   margin-bottom: 10px;
 }
 
+.gantt-builder-heading-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
 .gantt-builder-title-wrap label {
   font-size: 12px;
+  color: var(--text-muted);
+}
+
+.gantt-builder-heading-wrap label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.gantt-builder-title-wrap small {
   color: var(--text-muted);
 }
 
@@ -69,6 +85,24 @@
 
 .gantt-builder-table input[type="text"] {
   width: 100%;
+}
+
+.gantt-builder-table input[type="date"] {
+  width: 100%;
+}
+
+.gantt-builder-dependency-select {
+  width: 100%;
+}
+
+.gantt-builder-id-cell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.gantt-builder-id-cell input {
+  flex: 1;
 }
 
 .gantt-builder-status {

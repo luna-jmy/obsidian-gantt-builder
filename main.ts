@@ -16,6 +16,7 @@ import { GanttConfig, Task } from "./types";
 import {
   DEFAULT_CHART_TITLE,
   generateMermaidCode,
+  InsertMode,
   loadPersistedGanttData,
   parseTasksFromNote,
   toMermaidBlock,
@@ -23,12 +24,13 @@ import {
 } from "./utils/ganttHelper";
 
 const VIEW_TYPE_GANTT_BUILDER = "gantt-builder-view";
-
 type OpenMode = "modal" | "new-tab" | "sidebar";
 
 interface GanttBuilderSettings {
   excludeWeekends: boolean;
   openMode: OpenMode;
+  insertMode: InsertMode;
+  targetHeading: string;
 }
 
 interface GanttViewState extends Record<string, unknown> {
@@ -38,6 +40,8 @@ interface GanttViewState extends Record<string, unknown> {
 const DEFAULT_SETTINGS: GanttBuilderSettings = {
   excludeWeekends: true,
   openMode: "modal",
+  insertMode: "bottom",
+  targetHeading: "Gantt Chart",
 };
 
 const createEmptyTask = (): Task => ({
@@ -59,52 +63,89 @@ class GanttBuilderEditor {
   private readonly app: App;
   private readonly file: TFile;
   private readonly rootEl: HTMLElement;
-  private readonly onConfigChange: (config: GanttConfig) => Promise<void>;
+  private readonly previewComponent: Component;
+  private readonly onSettingsChange: (
+    update: Partial<Pick<GanttBuilderSettings, "excludeWeekends" | "insertMode" | "targetHeading">>,
+  ) => Promise<void>;
+
   private config: GanttConfig;
   private tasks: Task[] = [];
-  private readonly previewComponent: Component;
+  private chartTitle = DEFAULT_CHART_TITLE;
+  private insertMode: InsertMode;
+  private targetHeading: string;
+
   private readonly tableWrapEl: HTMLDivElement;
   private readonly previewPaneEl: HTMLDivElement;
   private readonly codePaneEl: HTMLDivElement;
   private readonly codeTextEl: HTMLTextAreaElement;
-  private activeTab: "preview" | "code" = "preview";
-  private readonly addTaskButton: HTMLButtonElement;
   private readonly titleInputEl: HTMLInputElement;
-  private chartTitle = DEFAULT_CHART_TITLE;
+  private readonly targetHeadingInputEl: HTMLInputElement;
 
   constructor(
     app: App,
     file: TFile,
     rootEl: HTMLElement,
-    config: GanttConfig,
-    onConfigChange: (config: GanttConfig) => Promise<void>,
+    settings: Pick<GanttBuilderSettings, "excludeWeekends" | "insertMode" | "targetHeading">,
+    onSettingsChange: (
+      update: Partial<Pick<GanttBuilderSettings, "excludeWeekends" | "insertMode" | "targetHeading">>,
+    ) => Promise<void>,
   ) {
     this.app = app;
     this.file = file;
     this.rootEl = rootEl;
-    this.config = { ...config };
-    this.onConfigChange = onConfigChange;
+    this.config = { excludeWeekends: settings.excludeWeekends };
+    this.insertMode = settings.insertMode;
+    this.targetHeading = settings.targetHeading;
+    this.onSettingsChange = onSettingsChange;
     this.previewComponent = new Component();
     this.previewComponent.load();
 
     const toolbarEl = this.rootEl.createDiv("gantt-builder-toolbar");
+
     new Setting(toolbarEl)
       .setName("排除周末")
       .setDesc("启用后按工作日计算时长")
       .addToggle((toggle) =>
         toggle.setValue(this.config.excludeWeekends).onChange(async (value) => {
           this.config.excludeWeekends = value;
-          await this.onConfigChange(this.config);
+          await this.onSettingsChange({ excludeWeekends: value });
           await this.refreshPreview();
         }),
       );
 
-    const topButtonsEl = toolbarEl.createDiv("gantt-builder-button-row");
+    const insertSetting = new Setting(toolbarEl).setName("甘特图写入位置").setDesc("选择写入到笔记中的位置");
+    insertSetting.addDropdown((dropdown) =>
+      dropdown
+        .addOption("cursor", "光标所在位置")
+        .addOption("bottom", "底部")
+        .addOption("heading", "特定标题下方")
+        .setValue(this.insertMode)
+        .onChange(async (value) => {
+          this.insertMode = value as InsertMode;
+          await this.onSettingsChange({ insertMode: this.insertMode });
+          this.updateTitleInputAvailability();
+          this.toggleHeadingInputVisibility();
+          await this.refreshPreview();
+        }),
+    );
+
+    const headingWrapEl = toolbarEl.createDiv("gantt-builder-heading-wrap");
+    headingWrapEl.createEl("label", { text: "目标标题（仅“特定标题下方”）" });
+    this.targetHeadingInputEl = headingWrapEl.createEl("input", {
+      type: "text",
+      value: this.targetHeading,
+      placeholder: "例如：计划",
+    });
+    this.targetHeadingInputEl.onchange = async () => {
+      this.targetHeading = this.targetHeadingInputEl.value.trim();
+      await this.onSettingsChange({ targetHeading: this.targetHeading });
+    };
+
     const titleWrapEl = toolbarEl.createDiv("gantt-builder-title-wrap");
     titleWrapEl.createEl("label", { text: "甘特图标题" });
     this.titleInputEl = titleWrapEl.createEl("input", {
       type: "text",
-      placeholder: "Gantt Chart",
+      placeholder: DEFAULT_CHART_TITLE,
       value: this.chartTitle,
     });
     this.titleInputEl.onchange = async () => {
@@ -112,7 +153,9 @@ class GanttBuilderEditor {
       this.titleInputEl.value = this.chartTitle;
       await this.refreshPreview();
     };
+    titleWrapEl.createEl("small", { text: "提示：写入位置为“特定标题下方”时，标题固定为默认值。" });
 
+    const topButtonsEl = toolbarEl.createDiv("gantt-builder-button-row");
     const reloadButton = topButtonsEl.createEl("button", { text: "从笔记重载" });
     reloadButton.onclick = async () => {
       await this.reloadTasks();
@@ -123,7 +166,7 @@ class GanttBuilderEditor {
 
     const copyButton = topButtonsEl.createEl("button", { text: "复制到剪贴板" });
     copyButton.onclick = async () => {
-      const code = generateMermaidCode(this.tasks, this.config);
+      const code = generateMermaidCode(this.tasks, this.config, this.getEffectiveChartTitle());
       await navigator.clipboard.writeText(toMermaidBlock(code));
       new Notice("Mermaid 代码已复制到剪贴板");
     };
@@ -135,8 +178,8 @@ class GanttBuilderEditor {
 
     const taskHeaderEl = this.rootEl.createDiv("gantt-builder-task-header");
     taskHeaderEl.createEl("h3", { text: "任务列表" });
-    this.addTaskButton = taskHeaderEl.createEl("button", { text: "新增任务", cls: "mod-cta" });
-    this.addTaskButton.onclick = async () => {
+    const addTaskButton = taskHeaderEl.createEl("button", { text: "新增任务", cls: "mod-cta" });
+    addTaskButton.onclick = async () => {
       this.tasks.push(createEmptyTask());
       this.renderTaskTable();
       await this.refreshPreview();
@@ -158,6 +201,9 @@ class GanttBuilderEditor {
       cls: "gantt-builder-code",
       attr: { readonly: "true" },
     });
+
+    this.toggleHeadingInputVisibility();
+    this.updateTitleInputAvailability();
   }
 
   async initialize(): Promise<void> {
@@ -170,17 +216,26 @@ class GanttBuilderEditor {
     this.previewComponent.unload();
   }
 
-  private switchTab(
-    tab: "preview" | "code",
-    previewButton: HTMLButtonElement,
-    codeButton: HTMLButtonElement,
-  ): void {
-    this.activeTab = tab;
+  private switchTab(tab: "preview" | "code", previewButton: HTMLButtonElement, codeButton: HTMLButtonElement): void {
     const previewActive = tab === "preview";
     previewButton.toggleClass("is-active", previewActive);
     codeButton.toggleClass("is-active", !previewActive);
     this.previewPaneEl.toggleClass("is-hidden", !previewActive);
     this.codePaneEl.toggleClass("is-hidden", previewActive);
+  }
+
+  private toggleHeadingInputVisibility(): void {
+    const shouldShow = this.insertMode === "heading";
+    this.targetHeadingInputEl.parentElement?.toggleClass("is-hidden", !shouldShow);
+  }
+
+  private updateTitleInputAvailability(): void {
+    const disabled = this.insertMode === "heading";
+    this.titleInputEl.disabled = disabled;
+  }
+
+  private getEffectiveChartTitle(): string {
+    return this.insertMode === "heading" ? DEFAULT_CHART_TITLE : this.chartTitle;
   }
 
   private async reloadTasks(): Promise<void> {
@@ -201,39 +256,42 @@ class GanttBuilderEditor {
     }
   }
 
+  private generateRandomTaskId(): string {
+    return `task-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  private getDependencyOptions(currentTask: Task): Array<{ value: string; label: string }> {
+    const options = this.tasks
+      .filter((task) => task.internalId !== currentTask.internalId && task.id.trim().length > 0)
+      .map((task) => ({
+        value: task.id.trim(),
+        label: `${task.id.trim()} · ${task.name || "未命名任务"}`,
+      }));
+
+    if (currentTask.dependency && !options.some((item) => item.value === currentTask.dependency)) {
+      options.unshift({
+        value: currentTask.dependency,
+        label: `${currentTask.dependency} · (当前依赖)`,
+      });
+    }
+
+    return options;
+  }
+
   private renderTaskTable(): void {
     this.tableWrapEl.empty();
     const table = this.tableWrapEl.createEl("table", { cls: "gantt-builder-table" });
     const head = table.createTHead();
     const headerRow = head.insertRow();
-    ["任务", "开始", "截止", "ID", "依赖", "分组", "状态", "操作"].forEach((title) => {
+    ["分组", "状态", "任务", "开始", "截止", "ID", "依赖", "操作"].forEach((title) => {
       headerRow.createEl("th", { text: title });
     });
 
     const body = table.createTBody();
     for (const task of this.tasks) {
       const row = body.insertRow();
-      this.bindInputCell(row, task.name, "任务名称", async (value) => {
-        task.name = value;
-        await this.refreshPreview();
-      });
-      this.bindInputCell(row, task.startDate, "YYYY-MM-DD", async (value) => {
-        task.startDate = value;
-        await this.refreshPreview();
-      });
-      this.bindInputCell(row, task.dueDate, "YYYY-MM-DD", async (value) => {
-        task.dueDate = value;
-        await this.refreshPreview();
-      });
-      this.bindInputCell(row, task.id, "可选", async (value) => {
-        task.id = value;
-        await this.refreshPreview();
-      });
-      this.bindInputCell(row, task.dependency, "任务 ID", async (value) => {
-        task.dependency = value;
-        await this.refreshPreview();
-      });
-      this.bindInputCell(row, task.section, "如：执行阶段", async (value) => {
+
+      this.bindTextInputCell(row, task.section, "如：执行阶段", async (value) => {
         task.section = value;
         await this.refreshPreview();
       });
@@ -268,6 +326,52 @@ class GanttBuilderEditor {
       };
       criticalLabel.appendText("关键");
 
+      this.bindTextInputCell(row, task.name, "任务名称", async (value) => {
+        task.name = value;
+        await this.refreshPreview();
+      });
+
+      this.bindDateInputCell(row, task.startDate, async (value) => {
+        task.startDate = value;
+        await this.refreshPreview();
+      });
+
+      this.bindDateInputCell(row, task.dueDate, async (value) => {
+        task.dueDate = value;
+        await this.refreshPreview();
+      });
+
+      const idCell = row.insertCell();
+      idCell.addClass("gantt-builder-id-cell");
+      const idInput = idCell.createEl("input", { type: "text", value: task.id, placeholder: "可选" });
+      idInput.onchange = async () => {
+        task.id = idInput.value.trim();
+        this.renderTaskTable();
+        await this.refreshPreview();
+      };
+      const randomButton = idCell.createEl("button", {
+        text: "🎲",
+        attr: { title: "自动生成随机 ID", "aria-label": "自动生成随机 ID" },
+      });
+      randomButton.onclick = async () => {
+        task.id = this.generateRandomTaskId();
+        this.renderTaskTable();
+        await this.refreshPreview();
+      };
+
+      const dependencyCell = row.insertCell();
+      const dependencySelect = dependencyCell.createEl("select");
+      dependencySelect.addClass("gantt-builder-dependency-select");
+      dependencySelect.createEl("option", { value: "", text: "无依赖" });
+      for (const option of this.getDependencyOptions(task)) {
+        dependencySelect.createEl("option", { value: option.value, text: option.label });
+      }
+      dependencySelect.value = task.dependency || "";
+      dependencySelect.onchange = async () => {
+        task.dependency = dependencySelect.value;
+        await this.refreshPreview();
+      };
+
       const actionCell = row.insertCell();
       const removeButton = actionCell.createEl("button", { text: "删除", cls: "mod-warning" });
       removeButton.onclick = async () => {
@@ -281,7 +385,7 @@ class GanttBuilderEditor {
     }
   }
 
-  private bindInputCell(
+  private bindTextInputCell(
     row: HTMLTableRowElement,
     value: string,
     placeholder: string,
@@ -292,8 +396,43 @@ class GanttBuilderEditor {
     input.onchange = async () => onChange(input.value.trim());
   }
 
+  private bindDateInputCell(
+    row: HTMLTableRowElement,
+    value: string,
+    onChange: (value: string) => Promise<void>,
+  ): void {
+    const cell = row.insertCell();
+    const input = cell.createEl("input", { type: "date", value });
+    input.onchange = async () => onChange(input.value.trim());
+  }
+
+  private getCursorOffsetForCurrentFile(): number | undefined {
+    const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!markdownView?.file || markdownView.file.path !== this.file.path) {
+      return undefined;
+    }
+
+    const editor = markdownView.editor as {
+      getCursor: () => { line: number; ch: number };
+      getValue: () => string;
+      posToOffset?: (pos: { line: number; ch: number }) => number;
+    };
+
+    const cursor = editor.getCursor();
+    if (typeof editor.posToOffset === "function") {
+      return editor.posToOffset(cursor);
+    }
+
+    const lines = editor.getValue().split("\n");
+    let offset = 0;
+    for (let line = 0; line < cursor.line; line++) {
+      offset += (lines[line] ?? "").length + 1;
+    }
+    return offset + cursor.ch;
+  }
+
   private async refreshPreview(): Promise<void> {
-    const mermaidCode = generateMermaidCode(this.tasks, this.config, this.chartTitle);
+    const mermaidCode = generateMermaidCode(this.tasks, this.config, this.getEffectiveChartTitle());
     this.codeTextEl.value = toMermaidBlock(mermaidCode);
     this.previewPaneEl.empty();
     await MarkdownRenderer.render(
@@ -307,8 +446,19 @@ class GanttBuilderEditor {
 
   private async saveArtifactsToNote(): Promise<void> {
     const current = await this.app.vault.read(this.file);
-    const mermaidCode = generateMermaidCode(this.tasks, this.config, this.chartTitle);
-    const next = upsertGanttArtifacts(current, mermaidCode, this.tasks, this.chartTitle);
+    const effectiveTitle = this.getEffectiveChartTitle();
+    const mermaidCode = generateMermaidCode(this.tasks, this.config, effectiveTitle);
+    const cursorOffset = this.getCursorOffsetForCurrentFile();
+    if (this.insertMode === "cursor" && cursorOffset === undefined) {
+      new Notice("未找到当前笔记光标位置，已回退到底部写入。");
+    }
+
+    const next = upsertGanttArtifacts(current, mermaidCode, this.tasks, effectiveTitle, {
+      mode: this.insertMode === "cursor" && cursorOffset === undefined ? "bottom" : this.insertMode,
+      headingText: this.targetHeading,
+      cursorOffset,
+      useCustomTitle: this.insertMode !== "heading",
+    });
     await this.app.vault.modify(this.file, next);
     new Notice("已写入甘特图与可编辑任务数据");
   }
@@ -333,9 +483,13 @@ class GanttBuilderModal extends Modal {
       this.app,
       this.file,
       this.contentEl,
-      { excludeWeekends: this.plugin.settings.excludeWeekends },
-      async (config) => {
-        this.plugin.settings.excludeWeekends = config.excludeWeekends;
+      {
+        excludeWeekends: this.plugin.settings.excludeWeekends,
+        insertMode: this.plugin.settings.insertMode,
+        targetHeading: this.plugin.settings.targetHeading,
+      },
+      async (update) => {
+        Object.assign(this.plugin.settings, update);
         await this.plugin.saveSettings();
       },
     );
@@ -411,9 +565,13 @@ class GanttBuilderWorkspaceView extends ItemView {
       this.app,
       this.file,
       container,
-      { excludeWeekends: this.plugin.settings.excludeWeekends },
-      async (config) => {
-        this.plugin.settings.excludeWeekends = config.excludeWeekends;
+      {
+        excludeWeekends: this.plugin.settings.excludeWeekends,
+        insertMode: this.plugin.settings.insertMode,
+        targetHeading: this.plugin.settings.targetHeading,
+      },
+      async (update) => {
+        Object.assign(this.plugin.settings, update);
         await this.plugin.saveSettings();
       },
     );
@@ -530,6 +688,31 @@ class GanttBuilderSettingTab extends PluginSettingTab {
             this.plugin.settings.openMode = value as OpenMode;
             await this.plugin.saveSettings();
           }),
+      );
+
+    new Setting(containerEl)
+      .setName("默认写入位置")
+      .setDesc("默认写入甘特图到笔记的方式")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("cursor", "光标所在位置")
+          .addOption("bottom", "底部")
+          .addOption("heading", "特定标题下方")
+          .setValue(this.plugin.settings.insertMode)
+          .onChange(async (value) => {
+            this.plugin.settings.insertMode = value as InsertMode;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("默认目标标题")
+      .setDesc("当写入方式为“特定标题下方”时使用")
+      .addText((text) =>
+        text.setValue(this.plugin.settings.targetHeading).onChange(async (value) => {
+          this.plugin.settings.targetHeading = value.trim();
+          await this.plugin.saveSettings();
+        }),
       );
   }
 }

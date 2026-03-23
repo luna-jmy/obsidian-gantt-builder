@@ -1,35 +1,64 @@
-# Obsidian Gantt Builder（插件版）
+# Obsidian Gantt Builder
 
-把“当前打开笔记”中的 task 读入 UI，编辑后实时预览 Mermaid 甘特图，并一键写回到该笔记。
+An Obsidian plugin to build and edit Mermaid Gantt charts from tasks in the **current note**.
 
-## 功能
+## Core Features
 
-- 基于当前单条笔记读取 task（`- [ ] ...` / `- [x] ...`）
-- UI 编辑任务字段（名称、开始/截止、分组、依赖、里程碑、关键任务）
-- 实时预览 Mermaid 甘特图
-- 一键写入或更新笔记里的甘特代码块（带 `%% gantt-builder:start %%` 标记）
-- 支持“排除周末”按工作日计算时长
+- Open builder in `New Tab` / `Sidebar` / `Modal`.
+- Edit tasks in UI with:
+  - section/group
+  - status toggles
+  - task name
+  - start/due date picker
+  - task ID + random ID generator
+  - dependency dropdown from existing task IDs
+- Switch between **Preview** and **Mermaid code** tabs.
+- Persist editable task data and Mermaid block back to note.
+- Reload from persisted data, or fallback parse from existing Gantt block.
 
-## 任务解析规则（已支持）
+## Gantt Insert Position
 
-- 开始日期：`🛫 2026-03-20` 或 `[start:: 2026-03-20]`
-- 截止日期：`📅 2026-03-28` 或 `[due:: 2026-03-28]`
-- 任务 ID：`🆔 t1` 或 `[id:: t1]`
-- 依赖：`⛓️ t1` / `🔗 t1` 或 `[depends:: t1]`
-- 里程碑：`#milestone` 或 `🚩`
-- 关键任务：`#crit` / `#critical` 或 `🔥`
+- Cursor position
+- Note bottom
+- Below a specific heading
+  - In this mode, chart title is fixed to default `Gantt Chart`.
 
-## 开发
+## Task Format Support
+
+Reference:
+- [About Task Formats](https://publish.obsidian.md/tasks/Reference/Task+Formats/About+Task+Formats)
+- [Tasks Emoji Format](https://publish.obsidian.md/tasks/Reference/Task+Formats/Tasks+Emoji+Format)
+
+Supported Tasks Emoji fields (for Gantt parsing):
+- `🛫 YYYY-MM-DD` (start)
+- `⏳ YYYY-MM-DD` (scheduled, used as start fallback)
+- `📅 YYYY-MM-DD` (due)
+- `🆔 <id>`
+- `⛔ <id>` (depends on)
+- `🔺` / `#crit` / `#critical` (critical)
+
+Supported Dataview-style fields:
+- `[start:: YYYY-MM-DD]`
+- `[scheduled:: YYYY-MM-DD]`
+- `[due:: YYYY-MM-DD]`
+- `[id:: task-id]`
+- `[dependsOn:: task-id]` / `[depends on:: task-id]` / `[depends:: task-id]`
+
+## Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-## 构建
+## Build
 
 ```bash
 npm run build
 ```
 
-构建产物为根目录 `main.js`，并配合 `manifest.json`、`styles.css` 作为 Obsidian 插件文件使用。
+Release artifacts:
+- `main.js`
+- `manifest.json`
+- `styles.css`
+- `versions.json`
