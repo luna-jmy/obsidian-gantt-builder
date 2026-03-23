@@ -1,4 +1,5 @@
 import { GanttConfig, Task } from "../types";
+import { t } from "../i18n";
 
 const DATE_PATTERN = "\\d{4}-\\d{2}-\\d{2}";
 const startDateRegex = new RegExp(`(?:\\u{1F6EB}\\uFE0F?\\s*|\\[start::\\s*)(${DATE_PATTERN})\\]?`, "u");
@@ -20,7 +21,7 @@ const LEGACY_DATA_END_MARKER = "%% gantt-builder:data:end %%";
 const GANTT_START_MARKER = "%% gantt-builder:start %%";
 const GANTT_END_MARKER = "%% gantt-builder:end %%";
 
-export const DEFAULT_CHART_TITLE = "Gantt Chart";
+export const DEFAULT_CHART_TITLE = "";
 export type InsertMode = "cursor" | "bottom" | "heading";
 
 export interface PersistedGanttData {
@@ -300,8 +301,12 @@ function calculateDependencyDuration(currentTaskDueDate: string, dependencyTask:
 }
 
 export function generateMermaidCode(tasks: Task[], config: GanttConfig, chartTitle = DEFAULT_CHART_TITLE): string {
-  const safeTitle = sanitizeName(chartTitle) || DEFAULT_CHART_TITLE;
-  const lines: string[] = ["gantt", `    title ${safeTitle}`, "    dateFormat YYYY-MM-DD", "    axisFormat %m/%d", "    todayMarker on"];
+  const safeTitle = sanitizeName(chartTitle);
+  const lines: string[] = ["gantt"];
+  if (safeTitle) {
+    lines.push(`    title ${safeTitle}`);
+  }
+  lines.push("    dateFormat YYYY-MM-DD", "    axisFormat %m/%d", "    todayMarker on");
   if (config.excludeWeekends) {
     lines.push("    excludes weekends");
   }
@@ -494,7 +499,7 @@ export function upsertGanttArtifacts(
 export function serializeTasksToMarkdown(tasks: Task[]): string {
   const sections = new Map<string, Task[]>();
   for (const task of tasks) {
-    const sectionName = task.section.trim() || "未分组";
+    const sectionName = task.section.trim() || t("ungrouped");
     if (!sections.has(sectionName)) {
       sections.set(sectionName, []);
     }

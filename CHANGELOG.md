@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-03-23
+
+### Fixed
+- Fixed language follow behavior to use Obsidian app language (`getLanguage()`), so plugin UI now follows Obsidian's current language setting.
+- Fixed `Gantt Title` behavior in `Below specific heading` mode: title is no longer locked and remains editable.
+- Changed default `Gantt Title` to empty; when empty, Mermaid output omits the `title` line.
+
+### Added
+- Added bilingual UI (Chinese/English) for main editor, notices, commands, and settings.
+- Added `LICENSE` file (MIT).
+
+### Docs
+- Updated `README.md`:
+  - Build/release artifacts do not include `versions.json`.
+  - Development instructions no longer reference `npm run dev`.
+
 ## [0.1.8] - 2026-03-23
 
 ### Fixed

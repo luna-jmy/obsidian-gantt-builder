@@ -21,7 +21,7 @@ An Obsidian plugin to build and edit Mermaid Gantt charts from tasks in the **cu
 - Cursor position
 - Note bottom
 - Below a specific heading
-  - In this mode, chart title is fixed to default `Gantt Chart`.
+  - `Gantt Title` only controls Mermaid chart title and can be left empty.
 
 ## Task Format Support
 
@@ -48,7 +48,7 @@ Supported Dataview-style fields:
 
 ```bash
 npm install
-npm run dev
+npm run build
 ```
 
 ## Build
@@ -61,4 +61,3 @@ Release artifacts:
 - `main.js`
 - `manifest.json`
 - `styles.css`
-- `versions.json`
