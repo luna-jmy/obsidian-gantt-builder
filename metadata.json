@@ -1,0 +1,5 @@
+{
+  "name": "Obsidian Gantt Builder",
+  "description": "Build Mermaid Gantt chart from tasks in current note.",
+  "requestFramePermissions": []
+}

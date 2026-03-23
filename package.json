@@ -1,0 +1,15 @@
+{
+  "name": "obsidian-gantt-builder",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit --skipLibCheck"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.2",
+    "obsidian": "^1.8.9",
+    "@types/node": "^22.14.0",
+    "typescript": "^5.8.2"
+  }
+}

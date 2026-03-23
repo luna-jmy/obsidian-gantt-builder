@@ -1,0 +1,80 @@
+.gantt-builder-modal .modal {
+  width: min(1320px, 92vw);
+}
+
+.gantt-builder-modal .modal-content {
+  max-height: 80vh;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.gantt-builder-toolbar {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  background: var(--background-secondary);
+}
+
+.gantt-builder-button-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.gantt-builder-table-wrap {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  overflow: auto;
+  max-height: 36vh;
+}
+
+.gantt-builder-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 980px;
+}
+
+.gantt-builder-table th,
+.gantt-builder-table td {
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding: 8px;
+  vertical-align: top;
+}
+
+.gantt-builder-table input[type="text"] {
+  width: 100%;
+}
+
+.gantt-builder-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.gantt-builder-status label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gantt-builder-preview {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--background-primary);
+  min-height: 260px;
+  overflow: auto;
+}
+
+.gantt-builder-code {
+  width: 100%;
+  min-height: 180px;
+  border-radius: 10px;
+  padding: 10px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary-alt);
+  font-family: var(--font-monospace);
+  font-size: 12px;
+}
