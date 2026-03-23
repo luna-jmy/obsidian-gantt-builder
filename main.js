@@ -81,6 +81,11 @@ function parseTasksFromNote(markdown) {
   }
   return tasks;
 }
+var DATA_START_MARKER = "%% gantt-builder:data:start %%";
+var DATA_END_MARKER = "%% gantt-builder:data:end %%";
+var GANTT_START_MARKER = "%% gantt-builder:start %%";
+var GANTT_END_MARKER = "%% gantt-builder:end %%";
+var DEFAULT_CHART_TITLE = "Gantt Chart";
 function calculateWorkingDays(startDate, endDate) {
   if (!startDate || !endDate) {
     return 1;
@@ -117,9 +122,11 @@ function calculateDuration(task, excludeWeekends) {
 function sanitizeName(name) {
   return name.replace(/[:#]/g, "").trim();
 }
-function generateMermaidCode(tasks, config) {
+function generateMermaidCode(tasks, config, chartTitle = DEFAULT_CHART_TITLE) {
   if (!tasks.length) {
-    return "gantt\n    title Empty Gantt\n    dateFormat YYYY-MM-DD";
+    return `gantt
+    title ${chartTitle}
+    dateFormat YYYY-MM-DD`;
   }
   const sections = /* @__PURE__ */ new Map();
   for (const task of tasks) {
@@ -131,7 +138,7 @@ function generateMermaidCode(tasks, config) {
   }
   const lines = [
     "gantt",
-    "    title Note Task Timeline",
+    `    title ${sanitizeName(chartTitle) || DEFAULT_CHART_TITLE}`,
     "    dateFormat YYYY-MM-DD",
     "    axisFormat %m/%d",
     "    todayMarker on"
@@ -175,11 +182,63 @@ function toMermaidBlock(mermaidCode) {
 ${mermaidCode}
 \`\`\``;
 }
-function upsertGanttBlock(noteContent, mermaidCode) {
-  const startMarker = "%% gantt-builder:start %%";
-  const endMarker = "%% gantt-builder:end %%";
+function loadPersistedGanttData(noteContent) {
+  const startIndex = noteContent.indexOf(DATA_START_MARKER);
+  const endIndex = noteContent.indexOf(DATA_END_MARKER);
+  if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
+    return null;
+  }
+  const rawBlock = noteContent.slice(startIndex + DATA_START_MARKER.length, endIndex);
+  const codeFenceMatch = rawBlock.match(/```json\s*([\s\S]*?)\s*```/i);
+  const jsonText = codeFenceMatch?.[1]?.trim() ?? rawBlock.trim();
+  if (!jsonText) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(jsonText);
+    const normalizeTasks = (rawTasks) => {
+      if (!Array.isArray(rawTasks)) {
+        return [];
+      }
+      return rawTasks.filter((item) => typeof item === "object" && item !== null).map((item) => {
+        const raw = item;
+        return {
+          internalId: raw.internalId || crypto.randomUUID(),
+          name: raw.name || "Untitled Task",
+          project: raw.project || "Current Note",
+          section: raw.section || "",
+          completed: Boolean(raw.completed),
+          startDate: raw.startDate || "",
+          dueDate: raw.dueDate || "",
+          owner: raw.owner || "",
+          id: raw.id || "",
+          dependency: raw.dependency || "",
+          isMilestone: Boolean(raw.isMilestone),
+          isHighPriority: Boolean(raw.isHighPriority)
+        };
+      });
+    };
+    if (Array.isArray(parsed)) {
+      return {
+        chartTitle: DEFAULT_CHART_TITLE,
+        tasks: normalizeTasks(parsed)
+      };
+    }
+    if (typeof parsed !== "object" || parsed === null) {
+      return null;
+    }
+    const data = parsed;
+    return {
+      chartTitle: typeof data.chartTitle === "string" && data.chartTitle.trim() ? data.chartTitle.trim() : DEFAULT_CHART_TITLE,
+      tasks: normalizeTasks(data.tasks)
+    };
+  } catch {
+    return null;
+  }
+}
+function upsertMarkedBlock(noteContent, startMarker, endMarker, blockBody) {
   const block = `${startMarker}
-${toMermaidBlock(mermaidCode)}
+${blockBody}
 ${endMarker}`;
   const startIndex = noteContent.indexOf(startMarker);
   const endIndex = noteContent.indexOf(endMarker);
@@ -192,22 +251,57 @@ ${block}
 
 ${after}`.trimEnd();
   }
-  const trimmed = noteContent.trimEnd();
-  if (!trimmed) {
-    return `${block}
-`;
-  }
-  return `${trimmed}
-
-## Gantt Chart
+  return `${noteContent.replace(/\s*$/, "")}
 
 ${block}
+`.trimStart();
+}
+function upsertGanttArtifacts(noteContent, mermaidCode, tasks, chartTitle = DEFAULT_CHART_TITLE) {
+  const payload = {
+    chartTitle: chartTitle.trim() || DEFAULT_CHART_TITLE,
+    tasks
+  };
+  const dataBlock = `\`\`\`json
+${JSON.stringify(payload, null, 2)}
+\`\`\``;
+  const mermaidBlock = toMermaidBlock(mermaidCode);
+  let result = noteContent;
+  result = upsertMarkedBlock(result, DATA_START_MARKER, DATA_END_MARKER, dataBlock);
+  result = upsertMarkedBlock(result, GANTT_START_MARKER, GANTT_END_MARKER, mermaidBlock);
+  if (!/^\s*##\s+Gantt Chart\s*$/m.test(result)) {
+    result = `${result.trimEnd()}
+
+## Gantt Chart
 `;
+  }
+  const ganttHeading = result.match(/^\s*##\s+Gantt Chart\s*$/m);
+  if (!ganttHeading) {
+    return result.trimEnd() + "\n";
+  }
+  const headingIndex = ganttHeading.index ?? 0;
+  const beforeHeading = result.slice(0, headingIndex).trimEnd();
+  const ganttSection = [
+    "## Gantt Chart",
+    "",
+    `${DATA_START_MARKER}`,
+    dataBlock,
+    `${DATA_END_MARKER}`,
+    "",
+    `${GANTT_START_MARKER}`,
+    mermaidBlock,
+    `${GANTT_END_MARKER}`,
+    ""
+  ].join("\n");
+  return `${beforeHeading}
+
+${ganttSection}`.trimEnd() + "\n";
 }
 
 // main.ts
+var VIEW_TYPE_GANTT_BUILDER = "gantt-builder-view";
 var DEFAULT_SETTINGS = {
-  excludeWeekends: true
+  excludeWeekends: true,
+  openMode: "modal"
 };
 var createEmptyTask = () => ({
   internalId: crypto.randomUUID(),
@@ -223,77 +317,121 @@ var createEmptyTask = () => ({
   isMilestone: false,
   isHighPriority: false
 });
-var GanttBuilderModal = class extends import_obsidian.Modal {
-  constructor(app, plugin, file, config) {
-    super(app);
+var GanttBuilderEditor = class {
+  constructor(app, file, rootEl, config, onConfigChange) {
     this.tasks = [];
-    this.previewGeneration = 0;
-    this.plugin = plugin;
+    this.activeTab = "preview";
+    this.chartTitle = DEFAULT_CHART_TITLE;
+    this.app = app;
     this.file = file;
-    this.config = config;
-    this.modalEl.addClass("gantt-builder-modal");
-    this.tableContainer = this.contentEl.createDiv("gantt-builder-table-wrap");
-    this.previewContainer = this.contentEl.createDiv("gantt-builder-preview");
-    this.codeContainer = this.contentEl.createEl("textarea", {
-      cls: "gantt-builder-code",
-      attr: { readonly: "true" }
-    });
+    this.rootEl = rootEl;
+    this.config = { ...config };
+    this.onConfigChange = onConfigChange;
     this.previewComponent = new import_obsidian.Component();
     this.previewComponent.load();
-  }
-  async onOpen() {
-    this.titleEl.setText(`Gantt Builder \xB7 ${this.file.basename}`);
-    await this.reloadFromNote();
-    this.renderToolbar();
-    this.renderTaskTable();
-    await this.refreshPreview();
-  }
-  onClose() {
-    this.previewComponent.unload();
-  }
-  renderToolbar() {
-    const toolbar = this.contentEl.createDiv("gantt-builder-toolbar");
-    new import_obsidian.Setting(toolbar).setName("\u6392\u9664\u5468\u672B").setDesc("\u542F\u7528\u540E\u4EE5\u5DE5\u4F5C\u65E5\u8BA1\u7B97\u6301\u7EED\u65F6\u95F4").addToggle(
+    const toolbarEl = this.rootEl.createDiv("gantt-builder-toolbar");
+    new import_obsidian.Setting(toolbarEl).setName("\u6392\u9664\u5468\u672B").setDesc("\u542F\u7528\u540E\u6309\u5DE5\u4F5C\u65E5\u8BA1\u7B97\u65F6\u957F").addToggle(
       (toggle) => toggle.setValue(this.config.excludeWeekends).onChange(async (value) => {
         this.config.excludeWeekends = value;
+        await this.onConfigChange(this.config);
         await this.refreshPreview();
       })
     );
-    const buttonGroup = toolbar.createDiv("gantt-builder-button-row");
-    const addTaskButton = buttonGroup.createEl("button", { text: "\u65B0\u589E\u4EFB\u52A1", cls: "mod-cta" });
-    addTaskButton.onclick = async () => {
+    const topButtonsEl = toolbarEl.createDiv("gantt-builder-button-row");
+    const titleWrapEl = toolbarEl.createDiv("gantt-builder-title-wrap");
+    titleWrapEl.createEl("label", { text: "\u7518\u7279\u56FE\u6807\u9898" });
+    this.titleInputEl = titleWrapEl.createEl("input", {
+      type: "text",
+      placeholder: "Gantt Chart",
+      value: this.chartTitle
+    });
+    this.titleInputEl.onchange = async () => {
+      this.chartTitle = this.titleInputEl.value.trim() || DEFAULT_CHART_TITLE;
+      this.titleInputEl.value = this.chartTitle;
+      await this.refreshPreview();
+    };
+    const reloadButton = topButtonsEl.createEl("button", { text: "\u4ECE\u7B14\u8BB0\u91CD\u8F7D" });
+    reloadButton.onclick = async () => {
+      await this.reloadTasks();
+      this.renderTaskTable();
+      await this.refreshPreview();
+      new import_obsidian.Notice("\u5DF2\u4ECE\u5F53\u524D\u7B14\u8BB0\u91CD\u8F7D\u4EFB\u52A1");
+    };
+    const copyButton = topButtonsEl.createEl("button", { text: "\u590D\u5236\u5230\u526A\u8D34\u677F" });
+    copyButton.onclick = async () => {
+      const code = generateMermaidCode(this.tasks, this.config);
+      await navigator.clipboard.writeText(toMermaidBlock(code));
+      new import_obsidian.Notice("Mermaid \u4EE3\u7801\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F");
+    };
+    const saveButton = topButtonsEl.createEl("button", { text: "\u5199\u5165/\u66F4\u65B0\u7518\u7279\u56FE", cls: "mod-cta" });
+    saveButton.onclick = async () => {
+      await this.saveArtifactsToNote();
+    };
+    const taskHeaderEl = this.rootEl.createDiv("gantt-builder-task-header");
+    taskHeaderEl.createEl("h3", { text: "\u4EFB\u52A1\u5217\u8868" });
+    this.addTaskButton = taskHeaderEl.createEl("button", { text: "\u65B0\u589E\u4EFB\u52A1", cls: "mod-cta" });
+    this.addTaskButton.onclick = async () => {
       this.tasks.push(createEmptyTask());
       this.renderTaskTable();
       await this.refreshPreview();
     };
-    const reloadButton = buttonGroup.createEl("button", { text: "\u4ECE\u7B14\u8BB0\u91CD\u8F7D" });
-    reloadButton.onclick = async () => {
-      await this.reloadFromNote();
-      this.renderTaskTable();
-      await this.refreshPreview();
-      new import_obsidian.Notice("\u5DF2\u4ECE\u5F53\u524D\u7B14\u8BB0\u91CD\u65B0\u52A0\u8F7D\u4EFB\u52A1");
-    };
-    const copyButton = buttonGroup.createEl("button", { text: "\u590D\u5236 Mermaid" });
-    copyButton.onclick = async () => {
-      const code = generateMermaidCode(this.tasks, this.config);
-      await navigator.clipboard.writeText(toMermaidBlock(code));
-      new import_obsidian.Notice("Mermaid \u4EE3\u7801\u5DF2\u590D\u5236");
-    };
-    const saveButton = buttonGroup.createEl("button", { text: "\u5199\u5165/\u66F4\u65B0\u7518\u7279\u56FE", cls: "mod-cta" });
-    saveButton.onclick = async () => {
-      await this.saveGanttBlockToNote();
-    };
+    this.tableWrapEl = this.rootEl.createDiv("gantt-builder-table-wrap");
+    const viewerWrapEl = this.rootEl.createDiv("gantt-builder-viewer");
+    const tabsEl = viewerWrapEl.createDiv("gantt-builder-tabs");
+    const previewTabButton = tabsEl.createEl("button", { text: "\u9884\u89C8", cls: "is-active" });
+    const codeTabButton = tabsEl.createEl("button", { text: "Mermaid \u4EE3\u7801" });
+    previewTabButton.onclick = () => this.switchTab("preview", previewTabButton, codeTabButton);
+    codeTabButton.onclick = () => this.switchTab("code", previewTabButton, codeTabButton);
+    this.previewPaneEl = viewerWrapEl.createDiv("gantt-builder-preview");
+    this.codePaneEl = viewerWrapEl.createDiv("gantt-builder-code-pane");
+    this.codePaneEl.addClass("is-hidden");
+    this.codeTextEl = this.codePaneEl.createEl("textarea", {
+      cls: "gantt-builder-code",
+      attr: { readonly: "true" }
+    });
+  }
+  async initialize() {
+    await this.reloadTasks();
+    this.renderTaskTable();
+    await this.refreshPreview();
+  }
+  destroy() {
+    this.previewComponent.unload();
+  }
+  switchTab(tab, previewButton, codeButton) {
+    this.activeTab = tab;
+    const previewActive = tab === "preview";
+    previewButton.toggleClass("is-active", previewActive);
+    codeButton.toggleClass("is-active", !previewActive);
+    this.previewPaneEl.toggleClass("is-hidden", !previewActive);
+    this.codePaneEl.toggleClass("is-hidden", previewActive);
+  }
+  async reloadTasks() {
+    const content = await this.app.vault.read(this.file);
+    const persisted = loadPersistedGanttData(content);
+    if (persisted && persisted.tasks.length > 0) {
+      this.tasks = persisted.tasks;
+      this.chartTitle = persisted.chartTitle || DEFAULT_CHART_TITLE;
+      this.titleInputEl.value = this.chartTitle;
+      return;
+    }
+    this.tasks = parseTasksFromNote(content);
+    this.chartTitle = DEFAULT_CHART_TITLE;
+    this.titleInputEl.value = this.chartTitle;
+    if (!this.tasks.length) {
+      this.tasks = [createEmptyTask()];
+    }
   }
   renderTaskTable() {
-    this.tableContainer.empty();
-    const table = this.tableContainer.createEl("table", { cls: "gantt-builder-table" });
+    this.tableWrapEl.empty();
+    const table = this.tableWrapEl.createEl("table", { cls: "gantt-builder-table" });
     const head = table.createTHead();
     const headerRow = head.insertRow();
-    ["\u4EFB\u52A1", "\u5F00\u59CB", "\u622A\u6B62", "ID", "\u4F9D\u8D56", "\u5206\u7EC4", "\u72B6\u6001", "\u64CD\u4F5C"].forEach((label) => {
-      headerRow.createEl("th", { text: label });
+    ["\u4EFB\u52A1", "\u5F00\u59CB", "\u622A\u6B62", "ID", "\u4F9D\u8D56", "\u5206\u7EC4", "\u72B6\u6001", "\u64CD\u4F5C"].forEach((title) => {
+      headerRow.createEl("th", { text: title });
     });
     const body = table.createTBody();
-    this.tasks.forEach((task) => {
+    for (const task of this.tasks) {
       const row = body.insertRow();
       this.bindInputCell(row, task.name, "\u4EFB\u52A1\u540D\u79F0", async (value) => {
         task.name = value;
@@ -315,7 +453,7 @@ var GanttBuilderModal = class extends import_obsidian.Modal {
         task.dependency = value;
         await this.refreshPreview();
       });
-      this.bindInputCell(row, task.section, "\u4F8B\u5982\uFF1A\u8BBE\u8BA1\u9636\u6BB5", async (value) => {
+      this.bindInputCell(row, task.section, "\u5982\uFF1A\u6267\u884C\u9636\u6BB5", async (value) => {
         task.section = value;
         await this.refreshPreview();
       });
@@ -349,41 +487,127 @@ var GanttBuilderModal = class extends import_obsidian.Modal {
       const removeButton = actionCell.createEl("button", { text: "\u5220\u9664", cls: "mod-warning" });
       removeButton.onclick = async () => {
         this.tasks = this.tasks.filter((item) => item.internalId !== task.internalId);
+        if (!this.tasks.length) {
+          this.tasks.push(createEmptyTask());
+        }
         this.renderTaskTable();
         await this.refreshPreview();
       };
-    });
+    }
   }
   bindInputCell(row, value, placeholder, onChange) {
     const cell = row.insertCell();
     const input = cell.createEl("input", { type: "text", value, placeholder });
     input.onchange = async () => onChange(input.value.trim());
   }
-  async reloadFromNote() {
-    const content = await this.app.vault.read(this.file);
-    this.tasks = parseTasksFromNote(content);
-    if (!this.tasks.length) {
-      this.tasks.push(createEmptyTask());
-    }
-  }
-  async saveGanttBlockToNote() {
-    const rawContent = await this.app.vault.read(this.file);
-    const mermaidCode = generateMermaidCode(this.tasks, this.config);
-    const nextContent = upsertGanttBlock(rawContent, mermaidCode);
-    await this.app.vault.modify(this.file, nextContent);
-    new import_obsidian.Notice("\u7518\u7279\u56FE\u4EE3\u7801\u5757\u5DF2\u5199\u5165\u5F53\u524D\u7B14\u8BB0");
-  }
   async refreshPreview() {
-    const mermaidCode = generateMermaidCode(this.tasks, this.config);
-    this.codeContainer.value = toMermaidBlock(mermaidCode);
-    const token = ++this.previewGeneration;
-    this.previewContainer.empty();
-    const markdown = `${toMermaidBlock(mermaidCode)}
-`;
-    await import_obsidian.MarkdownRenderer.render(this.app, markdown, this.previewContainer, this.file.path, this.previewComponent);
-    if (token !== this.previewGeneration) {
+    const mermaidCode = generateMermaidCode(this.tasks, this.config, this.chartTitle);
+    this.codeTextEl.value = toMermaidBlock(mermaidCode);
+    this.previewPaneEl.empty();
+    await import_obsidian.MarkdownRenderer.render(
+      this.app,
+      `${toMermaidBlock(mermaidCode)}
+`,
+      this.previewPaneEl,
+      this.file.path,
+      this.previewComponent
+    );
+  }
+  async saveArtifactsToNote() {
+    const current = await this.app.vault.read(this.file);
+    const mermaidCode = generateMermaidCode(this.tasks, this.config, this.chartTitle);
+    const next = upsertGanttArtifacts(current, mermaidCode, this.tasks, this.chartTitle);
+    await this.app.vault.modify(this.file, next);
+    new import_obsidian.Notice("\u5DF2\u5199\u5165\u7518\u7279\u56FE\u4E0E\u53EF\u7F16\u8F91\u4EFB\u52A1\u6570\u636E");
+  }
+};
+var GanttBuilderModal = class extends import_obsidian.Modal {
+  constructor(app, plugin, file) {
+    super(app);
+    this.editor = null;
+    this.plugin = plugin;
+    this.file = file;
+    this.modalEl.addClass("gantt-builder-modal");
+  }
+  async onOpen() {
+    this.contentEl.empty();
+    this.titleEl.setText(`Gantt Builder \xB7 ${this.file.basename}`);
+    this.editor = new GanttBuilderEditor(
+      this.app,
+      this.file,
+      this.contentEl,
+      { excludeWeekends: this.plugin.settings.excludeWeekends },
+      async (config) => {
+        this.plugin.settings.excludeWeekends = config.excludeWeekends;
+        await this.plugin.saveSettings();
+      }
+    );
+    await this.editor.initialize();
+  }
+  onClose() {
+    this.editor?.destroy();
+    this.editor = null;
+    this.contentEl.empty();
+  }
+};
+var GanttBuilderWorkspaceView = class extends import_obsidian.ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.file = null;
+    this.editor = null;
+    this.plugin = plugin;
+  }
+  getViewType() {
+    return VIEW_TYPE_GANTT_BUILDER;
+  }
+  getDisplayText() {
+    return this.file ? `Gantt Builder \xB7 ${this.file.basename}` : "Gantt Builder";
+  }
+  getIcon() {
+    return "calendar-clock";
+  }
+  async setState(state) {
+    const file = this.app.vault.getAbstractFileByPath(state.filePath);
+    if (!(file instanceof import_obsidian.TFile)) {
+      new import_obsidian.Notice("\u672A\u627E\u5230\u76EE\u6807\u7B14\u8BB0");
       return;
     }
+    this.file = file;
+    await this.renderEditor();
+  }
+  getState() {
+    return { filePath: this.file?.path ?? "" };
+  }
+  async onOpen() {
+    await this.renderEditor();
+  }
+  async onClose() {
+    this.editor?.destroy();
+    this.editor = null;
+  }
+  async renderEditor() {
+    const container = this.containerEl.children[1];
+    if (!container) {
+      return;
+    }
+    container.empty();
+    if (!this.file) {
+      container.createEl("div", { text: "\u8BF7\u4ECE\u547D\u4EE4\u6216\u529F\u80FD\u533A\u5728\u67D0\u6761\u7B14\u8BB0\u4E2D\u6253\u5F00 Gantt Builder\u3002" });
+      return;
+    }
+    this.editor?.destroy();
+    this.editor = new GanttBuilderEditor(
+      this.app,
+      this.file,
+      container,
+      { excludeWeekends: this.plugin.settings.excludeWeekends },
+      async (config) => {
+        this.plugin.settings.excludeWeekends = config.excludeWeekends;
+        await this.plugin.saveSettings();
+      }
+    );
+    await this.editor.initialize();
+    this.leaf.setEphemeralState({ title: `Gantt Builder \xB7 ${this.file.basename}` });
   }
 };
 var ObsidianGanttBuilderPlugin = class extends import_obsidian.Plugin {
@@ -393,6 +617,7 @@ var ObsidianGanttBuilderPlugin = class extends import_obsidian.Plugin {
   }
   async onload() {
     await this.loadSettings();
+    this.registerView(VIEW_TYPE_GANTT_BUILDER, (leaf) => new GanttBuilderWorkspaceView(leaf, this));
     this.addRibbonIcon("calendar-clock", "\u6253\u5F00\u5F53\u524D\u7B14\u8BB0 Gantt Builder", () => {
       void this.openBuilderForActiveNote();
     });
@@ -412,6 +637,9 @@ var ObsidianGanttBuilderPlugin = class extends import_obsidian.Plugin {
     });
     this.addSettingTab(new GanttBuilderSettingTab(this.app, this));
   }
+  onunload() {
+    this.app.workspace.detachLeavesOfType(VIEW_TYPE_GANTT_BUILDER);
+  }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
   }
@@ -425,10 +653,21 @@ var ObsidianGanttBuilderPlugin = class extends import_obsidian.Plugin {
       new import_obsidian.Notice("\u8BF7\u5148\u6253\u5F00\u4E00\u6761 Markdown \u7B14\u8BB0");
       return;
     }
-    const modal = new GanttBuilderModal(this.app, this, file, {
-      excludeWeekends: this.settings.excludeWeekends
+    if (this.settings.openMode === "modal") {
+      new GanttBuilderModal(this.app, this, file).open();
+      return;
+    }
+    const leaf = this.settings.openMode === "sidebar" ? this.app.workspace.getRightLeaf(false) : this.app.workspace.getLeaf("tab");
+    if (!leaf) {
+      new import_obsidian.Notice("\u65E0\u6CD5\u521B\u5EFA\u76EE\u6807\u89C6\u56FE\uFF0C\u8BF7\u91CD\u8BD5");
+      return;
+    }
+    await leaf.setViewState({
+      type: VIEW_TYPE_GANTT_BUILDER,
+      active: true,
+      state: { filePath: file.path }
     });
-    modal.open();
+    this.app.workspace.revealLeaf(leaf);
   }
 };
 var GanttBuilderSettingTab = class extends import_obsidian.PluginSettingTab {
@@ -439,9 +678,15 @@ var GanttBuilderSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("\u9ED8\u8BA4\u6392\u9664\u5468\u672B").setDesc("\u65B0\u5F00\u6784\u5EFA\u5668\u7A97\u53E3\u65F6\u9ED8\u8BA4\u542F\u7528\u8BE5\u9009\u9879").addToggle(
+    new import_obsidian.Setting(containerEl).setName("\u9ED8\u8BA4\u6392\u9664\u5468\u672B").setDesc("\u65B0\u5F00\u6784\u5EFA\u5668\u65F6\u9ED8\u8BA4\u542F\u7528").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.excludeWeekends).onChange(async (value) => {
         this.plugin.settings.excludeWeekends = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("\u6253\u5F00\u65B9\u5F0F").setDesc("\u9009\u62E9\u6253\u5F00\u6784\u5EFA\u5668\u7684\u9ED8\u8BA4\u4F4D\u7F6E").addDropdown(
+      (dropdown) => dropdown.addOption("new-tab", "New Tab").addOption("sidebar", "\u4FA7\u8FB9\u680F").addOption("modal", "\u5F39\u6846").setValue(this.plugin.settings.openMode).onChange(async (value) => {
+        this.plugin.settings.openMode = value;
         await this.plugin.saveSettings();
       })
     );

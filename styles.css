@@ -16,10 +16,35 @@
   background: var(--background-secondary);
 }
 
+.gantt-builder-task-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.gantt-builder-task-header h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
 .gantt-builder-button-row {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.gantt-builder-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.gantt-builder-title-wrap label {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .gantt-builder-table-wrap {
@@ -68,6 +93,34 @@
   overflow: auto;
 }
 
+.gantt-builder-viewer {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 300px;
+}
+
+.gantt-builder-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.gantt-builder-tabs button {
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.gantt-builder-tabs button.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+}
+
 .gantt-builder-code {
   width: 100%;
   min-height: 180px;
@@ -77,4 +130,13 @@
   background: var(--background-primary-alt);
   font-family: var(--font-monospace);
   font-size: 12px;
+}
+
+.gantt-builder-code-pane {
+  padding: 12px;
+  background: var(--background-primary);
+}
+
+.is-hidden {
+  display: none;
 }

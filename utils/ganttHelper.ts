@@ -75,6 +75,17 @@ export function parseTasksFromNote(markdown: string): Task[] {
   return tasks;
 }
 
+const DATA_START_MARKER = "%% gantt-builder:data:start %%";
+const DATA_END_MARKER = "%% gantt-builder:data:end %%";
+const GANTT_START_MARKER = "%% gantt-builder:start %%";
+const GANTT_END_MARKER = "%% gantt-builder:end %%";
+export const DEFAULT_CHART_TITLE = "Gantt Chart";
+
+export interface PersistedGanttData {
+  chartTitle: string;
+  tasks: Task[];
+}
+
 function calculateWorkingDays(startDate: string, endDate: string): number {
   if (!startDate || !endDate) {
     return 1;
@@ -120,9 +131,9 @@ function sanitizeName(name: string): string {
   return name.replace(/[:#]/g, "").trim();
 }
 
-export function generateMermaidCode(tasks: Task[], config: GanttConfig): string {
+export function generateMermaidCode(tasks: Task[], config: GanttConfig, chartTitle = DEFAULT_CHART_TITLE): string {
   if (!tasks.length) {
-    return "gantt\n    title Empty Gantt\n    dateFormat YYYY-MM-DD";
+    return `gantt\n    title ${chartTitle}\n    dateFormat YYYY-MM-DD`;
   }
 
   const sections = new Map<string, Task[]>();
@@ -136,7 +147,7 @@ export function generateMermaidCode(tasks: Task[], config: GanttConfig): string 
 
   const lines: string[] = [
     "gantt",
-    "    title Note Task Timeline",
+    `    title ${sanitizeName(chartTitle) || DEFAULT_CHART_TITLE}`,
     "    dateFormat YYYY-MM-DD",
     "    axisFormat %m/%d",
     "    todayMarker on",
@@ -186,11 +197,71 @@ export function toMermaidBlock(mermaidCode: string): string {
   return `\`\`\`mermaid\n${mermaidCode}\n\`\`\``;
 }
 
-export function upsertGanttBlock(noteContent: string, mermaidCode: string): string {
-  const startMarker = "%% gantt-builder:start %%";
-  const endMarker = "%% gantt-builder:end %%";
-  const block = `${startMarker}\n${toMermaidBlock(mermaidCode)}\n${endMarker}`;
+export function loadPersistedGanttData(noteContent: string): PersistedGanttData | null {
+  const startIndex = noteContent.indexOf(DATA_START_MARKER);
+  const endIndex = noteContent.indexOf(DATA_END_MARKER);
+  if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
+    return null;
+  }
 
+  const rawBlock = noteContent.slice(startIndex + DATA_START_MARKER.length, endIndex);
+  const codeFenceMatch = rawBlock.match(/```json\s*([\s\S]*?)\s*```/i);
+  const jsonText = codeFenceMatch?.[1]?.trim() ?? rawBlock.trim();
+
+  if (!jsonText) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(jsonText);
+    const normalizeTasks = (rawTasks: unknown): Task[] => {
+      if (!Array.isArray(rawTasks)) {
+        return [];
+      }
+      return rawTasks
+        .filter((item) => typeof item === "object" && item !== null)
+        .map((item) => {
+          const raw = item as Partial<Task>;
+          return {
+            internalId: raw.internalId || crypto.randomUUID(),
+            name: raw.name || "Untitled Task",
+            project: raw.project || "Current Note",
+            section: raw.section || "",
+            completed: Boolean(raw.completed),
+            startDate: raw.startDate || "",
+            dueDate: raw.dueDate || "",
+            owner: raw.owner || "",
+            id: raw.id || "",
+            dependency: raw.dependency || "",
+            isMilestone: Boolean(raw.isMilestone),
+            isHighPriority: Boolean(raw.isHighPriority),
+          };
+        });
+    };
+
+    if (Array.isArray(parsed)) {
+      return {
+        chartTitle: DEFAULT_CHART_TITLE,
+        tasks: normalizeTasks(parsed),
+      };
+    }
+
+    if (typeof parsed !== "object" || parsed === null) {
+      return null;
+    }
+
+    const data = parsed as Partial<PersistedGanttData>;
+    return {
+      chartTitle: typeof data.chartTitle === "string" && data.chartTitle.trim() ? data.chartTitle.trim() : DEFAULT_CHART_TITLE,
+      tasks: normalizeTasks(data.tasks),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function upsertMarkedBlock(noteContent: string, startMarker: string, endMarker: string, blockBody: string): string {
+  const block = `${startMarker}\n${blockBody}\n${endMarker}`;
   const startIndex = noteContent.indexOf(startMarker);
   const endIndex = noteContent.indexOf(endMarker);
 
@@ -200,10 +271,50 @@ export function upsertGanttBlock(noteContent: string, mermaidCode: string): stri
     return `${before}\n\n${block}\n\n${after}`.trimEnd();
   }
 
-  const trimmed = noteContent.trimEnd();
-  if (!trimmed) {
-    return `${block}\n`;
+  return `${noteContent.replace(/\s*$/, "")}\n\n${block}\n`.trimStart();
+}
+
+export function upsertGanttArtifacts(
+  noteContent: string,
+  mermaidCode: string,
+  tasks: Task[],
+  chartTitle = DEFAULT_CHART_TITLE,
+): string {
+  const payload: PersistedGanttData = {
+    chartTitle: chartTitle.trim() || DEFAULT_CHART_TITLE,
+    tasks,
+  };
+  const dataBlock = `\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\``;
+  const mermaidBlock = toMermaidBlock(mermaidCode);
+
+  let result = noteContent;
+  result = upsertMarkedBlock(result, DATA_START_MARKER, DATA_END_MARKER, dataBlock);
+  result = upsertMarkedBlock(result, GANTT_START_MARKER, GANTT_END_MARKER, mermaidBlock);
+
+  if (!/^\s*##\s+Gantt Chart\s*$/m.test(result)) {
+    result = `${result.trimEnd()}\n\n## Gantt Chart\n`;
   }
 
-  return `${trimmed}\n\n## Gantt Chart\n\n${block}\n`;
+  const ganttHeading = result.match(/^\s*##\s+Gantt Chart\s*$/m);
+  if (!ganttHeading) {
+    return result.trimEnd() + "\n";
+  }
+
+  const headingIndex = ganttHeading.index ?? 0;
+  const beforeHeading = result.slice(0, headingIndex).trimEnd();
+
+  const ganttSection = [
+    "## Gantt Chart",
+    "",
+    `${DATA_START_MARKER}`,
+    dataBlock,
+    `${DATA_END_MARKER}`,
+    "",
+    `${GANTT_START_MARKER}`,
+    mermaidBlock,
+    `${GANTT_END_MARKER}`,
+    "",
+  ].join("\n");
+
+  return `${beforeHeading}\n\n${ganttSection}`.trimEnd() + "\n";
 }
