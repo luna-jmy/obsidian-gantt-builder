@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-04-06
+
+### Added
+- Added a local ESLint review setup closer to Obsidian plugin marketplace checks, including `eslint-plugin-obsidianmd`.
+
+### Changed
+- Updated command and English UI copy to better align with marketplace review expectations.
+- Refined `README.md` and `metadata.json` so release metadata is more consistent.
+
+### Fixed
+- Removed `detachLeavesOfType()` from `onunload()`.
+- Fixed Promise handling issues reported by strict TypeScript ESLint rules.
+
 ## [0.1.9] - 2026-03-23
 
 ### Fixed
