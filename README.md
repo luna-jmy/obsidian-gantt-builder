@@ -1,35 +1,40 @@
 # Obsidian Gantt Builder
 
-An Obsidian plugin to build and edit Mermaid Gantt charts from tasks in the **current note**.
+A plugin for building and editing Mermaid Gantt charts from tasks in the current note.
 
-## Core Features
+## What it does
 
-- Open builder in `New Tab` / `Sidebar` / `Modal`.
-- Edit tasks in UI with:
-  - section/group
-  - status toggles
-  - task name
-  - start/due date picker
-  - task ID + random ID generator
-  - dependency dropdown from existing task IDs
-- Switch between **Preview** and **Mermaid code** tabs.
-- Persist editable task data and Mermaid block back to note.
-- Reload from persisted data, or fallback parse from existing Gantt block.
+- Opens the builder in a new tab, the sidebar, or a modal.
+- Lets you edit task group, task name, status, start date, due date, task ID, and dependencies in a UI.
+- Shows both a live preview and the generated Mermaid code.
+- Writes the editable task data and Mermaid Gantt block back into the note.
+- Reloads from saved plugin data, or falls back to parsing supported task syntax already in the note.
 
-## Gantt Insert Position
+## Typical workflow
 
-- Cursor position
-- Note bottom
+1. Open a Markdown note.
+2. Run the `Open builder for current note` command, or use the ribbon icon.
+3. Add or edit tasks in the builder UI.
+4. Preview the Mermaid Gantt chart.
+5. Write tasks or the Gantt chart back into the current note.
+
+## Write targets
+
+The plugin can write content:
+
+- At the cursor
+- At the bottom of the note
 - Below a specific heading
-  - `Gantt Title` only controls Mermaid chart title and can be left empty.
 
-## Task Format Support
+`Gantt title` only controls the Mermaid chart title and can be left empty.
 
-Reference:
+## Supported task formats
+
+References:
 - [About Task Formats](https://publish.obsidian.md/tasks/Reference/Task+Formats/About+Task+Formats)
 - [Tasks Emoji Format](https://publish.obsidian.md/tasks/Reference/Task+Formats/Tasks+Emoji+Format)
 
-Supported Tasks Emoji fields (for Gantt parsing):
+Supported Tasks emoji fields:
 - `🛫 YYYY-MM-DD` (start)
 - `⏳ YYYY-MM-DD` (scheduled, used as start fallback)
 - `📅 YYYY-MM-DD` (due)
@@ -48,16 +53,14 @@ Supported Dataview-style fields:
 
 ```bash
 npm install
+npm run lint
 npm run build
 ```
 
-## Build
+## Release artifacts
 
-```bash
-npm run build
-```
+The release package should include:
 
-Release artifacts:
 - `main.js`
 - `manifest.json`
 - `styles.css`

@@ -106,6 +106,7 @@ var dictionary = {
     openHintNoFile: "\u8BF7\u4ECE\u547D\u4EE4\u6216\u529F\u80FD\u533A\u5728\u67D0\u6761\u7B14\u8BB0\u4E2D\u6253\u5F00 Gantt Builder\u3002",
     ribbonTitle: "\u6253\u5F00\u5F53\u524D\u7B14\u8BB0 Gantt Builder",
     commandName: "\u6253\u5F00\u5F53\u524D\u7B14\u8BB0\u4EFB\u52A1\u7518\u7279\u6784\u5EFA\u5668",
+    builderTabTitle: "\u7518\u7279\u6784\u5EFA\u5668",
     openMarkdownFirst: "\u8BF7\u5148\u6253\u5F00\u4E00\u6761 Markdown \u7B14\u8BB0\u3002",
     createViewFailed: "\u65E0\u6CD5\u521B\u5EFA\u76EE\u6807\u89C6\u56FE\uFF0C\u8BF7\u91CD\u8BD5\u3002",
     settingDefaultExcludeWeekends: "\u9ED8\u8BA4\u6392\u9664\u5468\u672B",
@@ -124,36 +125,36 @@ var dictionary = {
     ungrouped: "\u672A\u5206\u7EC4"
   },
   en: {
-    defaultTargetHeading: "## Project Plan",
-    chartTitleLabel: "Gantt Title",
+    defaultTargetHeading: "## Project plan",
+    chartTitleLabel: "Gantt title",
     chartTitleHint: "Only affects Mermaid gantt title. Leave empty for no title.",
-    reloadFromNote: "Reload From Note",
+    reloadFromNote: "Reload from note",
     reloadSuccess: "Tasks reloaded from current note.",
-    copyToClipboard: "Copy to Clipboard",
+    copyToClipboard: "Copy to clipboard",
     mermaidCopied: "Mermaid code copied to clipboard.",
     exportSvg: "Export SVG",
     exportPng: "Export PNG",
-    saveTasks: "Write/Update Tasks",
-    saveGantt: "Write/Update Gantt",
-    currentNote: "Current Note: {name}",
-    taskListTitle: "Task List (Drag to Reorder)",
-    addTask: "Add Task",
+    saveTasks: "Write or update tasks",
+    saveGantt: "Write or update gantt",
+    currentNote: "Current note: {name}",
+    taskListTitle: "Task list (drag to reorder)",
+    addTask: "Add task",
     preview: "Preview",
-    mermaidCode: "Mermaid Code",
-    excludeWeekends: "Exclude Weekends",
+    mermaidCode: "Mermaid code",
+    excludeWeekends: "Exclude weekends",
     excludeWeekendsDesc: "If enabled, durations are calculated by working days.",
-    writePosition: "Write Position",
+    writePosition: "Write position",
     writePositionDesc: "Applies to both Gantt and task writing.",
-    optionCursor: "At Cursor",
-    optionBottom: "At Bottom",
-    optionHeading: "Below Specific Heading",
-    unnamedTask: "Untitled Task",
-    currentDependency: "(Current Dependency)",
+    optionCursor: "At cursor",
+    optionBottom: "At bottom",
+    optionHeading: "Below specific heading",
+    unnamedTask: "Untitled task",
+    currentDependency: "(Current dependency)",
     headerAction: "Action",
     headerGroup: "Group",
     headerTask: "Task",
     headerDate: "Date",
-    headerIdDependency: "ID/Dependency",
+    headerIdDependency: "ID/dependency",
     addInCurrentGroup: "Add task in current group",
     deleteTask: "Delete task",
     groupPlaceholder: "Group, e.g. Execution",
@@ -163,16 +164,16 @@ var dictionary = {
     critical: "Critical",
     from: "From",
     to: "To",
-    dateConflict: "Date Conflict",
+    dateConflict: "Date conflict",
     optional: "Optional",
     randomIdTitle: "Generate random ID",
     dependency: "Dependency",
-    noDependency: "No Dependency",
+    noDependency: "No dependency",
     noExportableChart: "No exportable chart found. Please render preview first.",
     svgExported: "SVG exported: {path}",
     pngExported: "PNG exported: {path}",
     failedLoadSvgForPng: "Failed to load SVG for PNG export",
-    createCanvasError: "Failed to create Canvas",
+    createCanvasError: "Failed to create canvas",
     invalidTaskHeading: "Invalid default task heading. Use format like: ## Project Plan",
     cursorFallback: "Cursor not found. Fallback to write at bottom.",
     tasksWritten: "Tasks written/updated to data scope.",
@@ -180,22 +181,23 @@ var dictionary = {
     ganttWritten: "Gantt written/updated.",
     noteNotFound: "Target note not found.",
     openHintNoFile: "Open Gantt Builder from a specific note via command or ribbon.",
-    ribbonTitle: "Open Gantt Builder For Current Note",
-    commandName: "Open Gantt Builder For Current Note",
+    ribbonTitle: "Open builder for current note",
+    commandName: "Open builder for current note",
+    builderTabTitle: "Builder",
     openMarkdownFirst: "Please open a Markdown note first.",
     createViewFailed: "Unable to create target view. Please retry.",
-    settingDefaultExcludeWeekends: "Default Exclude Weekends",
-    settingDefaultExcludeWeekendsDesc: "Enabled by default when opening builder.",
-    settingOpenMode: "Open Mode",
+    settingDefaultExcludeWeekends: "Default weekend exclusion",
+    settingDefaultExcludeWeekendsDesc: "Enabled by default when opening the builder.",
+    settingOpenMode: "Open location",
     settingOpenModeDesc: "Default location to open builder.",
     sidebar: "Sidebar",
     modal: "Modal",
-    newTab: "New Tab",
-    settingDefaultInsertMode: "Default Write Position",
+    newTab: "New tab",
+    settingDefaultInsertMode: "Default write position",
     settingDefaultInsertModeDesc: "Applies to both Gantt and task writing.",
-    settingGanttDefaultHeading: "Default Gantt Heading",
-    settingTaskDefaultHeading: "Default Task Heading",
-    settingHeadingDesc: "Must include heading markers, e.g. ## Project Plan",
+    settingGanttDefaultHeading: "Default gantt heading",
+    settingTaskDefaultHeading: "Default task heading",
+    settingHeadingDesc: "Must include heading markers, for example `## Project plan`.",
     headingFormatError: "Invalid heading format. Use e.g. ## Project Plan",
     ungrouped: "Ungrouped"
   }
@@ -906,7 +908,7 @@ var GanttBuilderEditor = class {
         row.classList.add("gantt-builder-row-drop");
       });
       row.addEventListener("dragleave", () => row.classList.remove("gantt-builder-row-drop"));
-      row.addEventListener("drop", async () => {
+      row.addEventListener("drop", () => {
         row.classList.remove("gantt-builder-row-drop");
         if (!this.draggingTaskId) {
           return;
@@ -914,7 +916,7 @@ var GanttBuilderEditor = class {
         this.moveTask(this.draggingTaskId, task.internalId);
         this.draggingTaskId = null;
         this.renderTaskTable();
-        await this.refreshPreview();
+        void this.refreshPreview();
       });
       const actionCell = row.insertCell();
       const actionStack = actionCell.createDiv("gantt-builder-action-stack");
@@ -1182,7 +1184,7 @@ var GanttBuilderModal = class extends import_obsidian2.Modal {
   }
   async onOpen() {
     this.contentEl.empty();
-    this.titleEl.setText(`Gantt Builder \xB7 ${this.file.basename}`);
+    this.titleEl.setText(`${t("builderTabTitle")} \xB7 ${this.file.basename}`);
     this.editor = new GanttBuilderEditor(
       this.app,
       this.file,
@@ -1217,7 +1219,7 @@ var GanttBuilderWorkspaceView = class extends import_obsidian2.ItemView {
     return VIEW_TYPE_GANTT_BUILDER;
   }
   getDisplayText() {
-    return this.file ? `Gantt Builder \xB7 ${this.file.basename}` : "Gantt Builder";
+    return this.file ? `${t("builderTabTitle")} \xB7 ${this.file.basename}` : t("builderTabTitle");
   }
   getIcon() {
     return "calendar-clock";
@@ -1237,7 +1239,7 @@ var GanttBuilderWorkspaceView = class extends import_obsidian2.ItemView {
   async onOpen() {
     await this.renderEditor();
   }
-  async onClose() {
+  onClose() {
     this.editor?.destroy();
     this.editor = null;
   }
@@ -1268,7 +1270,7 @@ var GanttBuilderWorkspaceView = class extends import_obsidian2.ItemView {
       }
     );
     await this.editor.initialize();
-    this.leaf.setEphemeralState({ title: `Gantt Builder \xB7 ${this.file.basename}` });
+    this.leaf.setEphemeralState({ title: `${t("builderTabTitle")} \xB7 ${this.file.basename}` });
   }
 };
 var ObsidianGanttBuilderPlugin = class extends import_obsidian2.Plugin {
@@ -1295,9 +1297,6 @@ var ObsidianGanttBuilderPlugin = class extends import_obsidian2.Plugin {
       }
     });
     this.addSettingTab(new GanttBuilderSettingTab(this.app, this));
-  }
-  onunload() {
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE_GANTT_BUILDER);
   }
   async loadSettings() {
     const loaded = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -1339,7 +1338,7 @@ var ObsidianGanttBuilderPlugin = class extends import_obsidian2.Plugin {
       active: true,
       state: { filePath: file.path }
     });
-    this.app.workspace.revealLeaf(leaf);
+    await this.app.workspace.revealLeaf(leaf);
   }
 };
 var GanttBuilderSettingTab = class extends import_obsidian2.PluginSettingTab {

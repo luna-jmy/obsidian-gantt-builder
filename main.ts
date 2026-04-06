@@ -324,7 +324,7 @@ class GanttBuilderEditor {
         row.classList.add("gantt-builder-row-drop");
       });
       row.addEventListener("dragleave", () => row.classList.remove("gantt-builder-row-drop"));
-      row.addEventListener("drop", async () => {
+      row.addEventListener("drop", () => {
         row.classList.remove("gantt-builder-row-drop");
         if (!this.draggingTaskId) {
           return;
@@ -332,7 +332,7 @@ class GanttBuilderEditor {
         this.moveTask(this.draggingTaskId, task.internalId);
         this.draggingTaskId = null;
         this.renderTaskTable();
-        await this.refreshPreview();
+        void this.refreshPreview();
       });
 
       const actionCell = row.insertCell();
@@ -629,7 +629,7 @@ class GanttBuilderModal extends Modal {
 
   async onOpen(): Promise<void> {
     this.contentEl.empty();
-    this.titleEl.setText(`Gantt Builder · ${this.file.basename}`);
+    this.titleEl.setText(`${t("builderTabTitle")} · ${this.file.basename}`);
     this.editor = new GanttBuilderEditor(
       this.app,
       this.file,
@@ -670,7 +670,7 @@ class GanttBuilderWorkspaceView extends ItemView {
   }
 
   getDisplayText(): string {
-    return this.file ? `Gantt Builder · ${this.file.basename}` : "Gantt Builder";
+    return this.file ? `${t("builderTabTitle")} · ${this.file.basename}` : t("builderTabTitle");
   }
 
   getIcon(): string {
@@ -695,7 +695,7 @@ class GanttBuilderWorkspaceView extends ItemView {
     await this.renderEditor();
   }
 
-  async onClose(): Promise<void> {
+  onClose(): void {
     this.editor?.destroy();
     this.editor = null;
   }
@@ -728,7 +728,7 @@ class GanttBuilderWorkspaceView extends ItemView {
       },
     );
     await this.editor.initialize();
-    this.leaf.setEphemeralState({ title: `Gantt Builder · ${this.file.basename}` });
+    this.leaf.setEphemeralState({ title: `${t("builderTabTitle")} · ${this.file.basename}` });
   }
 }
 
@@ -757,10 +757,6 @@ export default class ObsidianGanttBuilderPlugin extends Plugin {
     });
 
     this.addSettingTab(new GanttBuilderSettingTab(this.app, this));
-  }
-
-  onunload(): void {
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE_GANTT_BUILDER);
   }
 
   async loadSettings(): Promise<void> {
@@ -808,7 +804,7 @@ export default class ObsidianGanttBuilderPlugin extends Plugin {
       active: true,
       state: { filePath: file.path } satisfies GanttViewState,
     });
-    this.app.workspace.revealLeaf(leaf);
+    await this.app.workspace.revealLeaf(leaf);
   }
 }
 
