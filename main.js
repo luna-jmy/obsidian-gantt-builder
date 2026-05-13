@@ -1213,6 +1213,7 @@ var GanttBuilderWorkspaceView = class extends import_obsidian2.ItemView {
     super(leaf);
     this.file = null;
     this.editor = null;
+    this.renderVersion = 0;
     this.plugin = plugin;
   }
   getViewType() {
@@ -1230,20 +1231,41 @@ var GanttBuilderWorkspaceView = class extends import_obsidian2.ItemView {
       new import_obsidian2.Notice(t("noteNotFound"));
       return;
     }
-    this.file = file;
-    await this.renderEditor();
+    await this.setFile(file);
   }
   getState() {
     return { filePath: this.file?.path ?? "" };
   }
   async onOpen() {
+    this.registerEvent(
+      this.app.workspace.on("file-open", (file) => {
+        if (file instanceof import_obsidian2.TFile) {
+          void this.setFile(file);
+        }
+      })
+    );
+    const activeFile = this.app.workspace.getActiveFile();
+    if (activeFile instanceof import_obsidian2.TFile) {
+      await this.setFile(activeFile);
+      return;
+    }
     await this.renderEditor();
   }
   onClose() {
+    this.renderVersion += 1;
     this.editor?.destroy();
     this.editor = null;
+    return Promise.resolve();
+  }
+  async setFile(file) {
+    if (this.file?.path === file.path) {
+      return;
+    }
+    this.file = file;
+    await this.renderEditor();
   }
   async renderEditor() {
+    const renderVersion = ++this.renderVersion;
     const container = this.containerEl.children[1];
     if (!container) {
       return;
@@ -1254,7 +1276,7 @@ var GanttBuilderWorkspaceView = class extends import_obsidian2.ItemView {
       return;
     }
     this.editor?.destroy();
-    this.editor = new GanttBuilderEditor(
+    const editor = new GanttBuilderEditor(
       this.app,
       this.file,
       container,
@@ -1269,7 +1291,15 @@ var GanttBuilderWorkspaceView = class extends import_obsidian2.ItemView {
         await this.plugin.saveSettings();
       }
     );
-    await this.editor.initialize();
+    this.editor = editor;
+    await editor.initialize();
+    if (renderVersion !== this.renderVersion) {
+      if (this.editor === editor) {
+        this.editor = null;
+      }
+      editor.destroy();
+      return;
+    }
     this.leaf.setEphemeralState({ title: `${t("builderTabTitle")} \xB7 ${this.file.basename}` });
   }
 };

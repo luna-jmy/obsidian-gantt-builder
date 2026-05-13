@@ -659,6 +659,7 @@ class GanttBuilderWorkspaceView extends ItemView {
   private readonly plugin: ObsidianGanttBuilderPlugin;
   private file: TFile | null = null;
   private editor: GanttBuilderEditor | null = null;
+  private renderVersion = 0;
 
   constructor(leaf: WorkspaceLeaf, plugin: ObsidianGanttBuilderPlugin) {
     super(leaf);
@@ -683,8 +684,7 @@ class GanttBuilderWorkspaceView extends ItemView {
       new Notice(t("noteNotFound"));
       return;
     }
-    this.file = file;
-    await this.renderEditor();
+    await this.setFile(file);
   }
 
   getState(): GanttViewState {
@@ -692,15 +692,39 @@ class GanttBuilderWorkspaceView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    this.registerEvent(
+      this.app.workspace.on("file-open", (file) => {
+        if (file instanceof TFile) {
+          void this.setFile(file);
+        }
+      }),
+    );
+
+    const activeFile = this.app.workspace.getActiveFile();
+    if (activeFile instanceof TFile) {
+      await this.setFile(activeFile);
+      return;
+    }
     await this.renderEditor();
   }
 
-  onClose(): void {
+  onClose(): Promise<void> {
+    this.renderVersion += 1;
     this.editor?.destroy();
     this.editor = null;
+    return Promise.resolve();
+  }
+
+  private async setFile(file: TFile): Promise<void> {
+    if (this.file?.path === file.path) {
+      return;
+    }
+    this.file = file;
+    await this.renderEditor();
   }
 
   private async renderEditor(): Promise<void> {
+    const renderVersion = ++this.renderVersion;
     const container = this.containerEl.children[1] as HTMLElement | undefined;
     if (!container) {
       return;
@@ -712,7 +736,7 @@ class GanttBuilderWorkspaceView extends ItemView {
     }
 
     this.editor?.destroy();
-    this.editor = new GanttBuilderEditor(
+    const editor = new GanttBuilderEditor(
       this.app,
       this.file,
       container,
@@ -727,7 +751,15 @@ class GanttBuilderWorkspaceView extends ItemView {
         await this.plugin.saveSettings();
       },
     );
-    await this.editor.initialize();
+    this.editor = editor;
+    await editor.initialize();
+    if (renderVersion !== this.renderVersion) {
+      if (this.editor === editor) {
+        this.editor = null;
+      }
+      editor.destroy();
+      return;
+    }
     this.leaf.setEphemeralState({ title: `${t("builderTabTitle")} · ${this.file.basename}` });
   }
 }
