@@ -22,7 +22,7 @@ const GANTT_START_MARKER = "%% gantt-builder:start %%";
 const GANTT_END_MARKER = "%% gantt-builder:end %%";
 
 export const DEFAULT_CHART_TITLE = "";
-export type InsertMode = "cursor" | "bottom" | "heading";
+export type InsertMode = "cursor" | "bottom";
 
 export interface PersistedGanttData {
   chartTitle: string;
@@ -31,7 +31,6 @@ export interface PersistedGanttData {
 
 export interface InsertOptions {
   mode: InsertMode;
-  headingText?: string;
   cursorOffset?: number;
   useCustomTitle?: boolean;
 }
@@ -422,58 +421,10 @@ function replaceExistingGantt(noteContent: string, ganttBlock: string): string |
   return `${before}\n\n${ganttBlock}\n\n${after}`.trimEnd() + "\n";
 }
 
-function parseHeadingSpec(headingText: string): { level: number; text: string } | null {
-  const match = headingText.trim().match(/^(#{1,6})\s+(.+)$/);
-  if (!match) {
-    return null;
-  }
-  const text = match[2].replace(/\s+#+\s*$/, "").trim();
-  if (!text) {
-    return null;
-  }
-  return { level: match[1].length, text };
-}
-
-function findHeadingInsertPos(noteContent: string, headingText: string): number {
-  const target = parseHeadingSpec(headingText);
-  if (!target) {
-    return -1;
-  }
-
-  const lines = noteContent.split(/\r?\n/);
-  let offset = 0;
-
-  for (const line of lines) {
-    const headingMatch = line.match(/^\s{0,3}(#{1,6})\s+(.+)$/);
-    if (headingMatch) {
-      const level = headingMatch[1].length;
-      const currentText = headingMatch[2].replace(/\s+#+\s*$/, "").trim();
-      if (level === target.level && currentText === target.text) {
-        return offset + line.length + 1;
-      }
-    }
-    offset += line.length + 1;
-  }
-
-  return -1;
-}
-
-function insertAfterHeading(noteContent: string, headingText: string, block: string): string {
-  const insertPos = findHeadingInsertPos(noteContent, headingText);
-  if (insertPos === -1) {
-    return `${noteContent.replace(/\s*$/, "")}\n\n${block}\n`;
-  }
-  return `${noteContent.slice(0, insertPos)}\n${block}\n${noteContent.slice(insertPos)}`.trimEnd() + "\n";
-}
-
 function insertBlockByMode(noteContent: string, block: string, options: InsertOptions): string {
   if (options.mode === "cursor" && typeof options.cursorOffset === "number") {
     const offset = Math.max(0, Math.min(options.cursorOffset, noteContent.length));
     return `${noteContent.slice(0, offset)}\n${block}\n${noteContent.slice(offset)}`.trimEnd() + "\n";
-  }
-
-  if (options.mode === "heading") {
-    return insertAfterHeading(noteContent, options.headingText ?? "", block);
   }
 
   return `${noteContent.replace(/\s*$/, "")}\n\n${block}\n`.trimStart();
@@ -551,12 +502,6 @@ export function upsertTaskScope(noteContent: string, tasks: Task[], options: Ins
     const startIndex = noteContent.indexOf(scope.start);
     const endIndex = noteContent.indexOf(scope.end);
     if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-      if (options.mode === "heading") {
-        const before = noteContent.slice(0, startIndex).replace(/\s+$/, "");
-        const after = noteContent.slice(endIndex + scope.end.length).replace(/^\s+/, "");
-        const withoutOldScope = `${before}\n\n${after}`.trimEnd() + "\n";
-        return insertBlockByMode(withoutOldScope, block, options);
-      }
       const before = noteContent.slice(0, startIndex).replace(/\s+$/, "");
       const after = noteContent.slice(endIndex + scope.end.length).replace(/^\s+/, "");
       return `${before}\n\n${block}\n\n${after}`.trimEnd() + "\n";

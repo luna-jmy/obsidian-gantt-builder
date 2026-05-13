@@ -32,20 +32,21 @@ interface GanttBuilderSettings {
   excludeWeekends: boolean;
   openMode: OpenMode;
   insertMode: InsertMode;
-  ganttTargetHeading: string;
-  taskTargetHeading: string;
 }
 
 interface GanttViewState extends Record<string, unknown> {
   filePath: string;
 }
 
+interface DependencyOption {
+  value: string;
+  label: string;
+}
+
 const DEFAULT_SETTINGS: GanttBuilderSettings = {
   excludeWeekends: true,
   openMode: "modal",
   insertMode: "bottom",
-  ganttTargetHeading: t("defaultTargetHeading"),
-  taskTargetHeading: t("defaultTargetHeading"),
 };
 
 const createEmptyTask = (section = ""): Task => ({
@@ -63,6 +64,110 @@ const createEmptyTask = (section = ""): Task => ({
   isHighPriority: false,
 });
 
+class TaskDetailsModal extends Modal {
+  private readonly task: Task;
+  private readonly dependencyOptions: DependencyOption[];
+  private readonly onTaskChange: () => Promise<void>;
+
+  constructor(app: App, task: Task, dependencyOptions: DependencyOption[], onTaskChange: () => Promise<void>) {
+    super(app);
+    this.task = task;
+    this.dependencyOptions = dependencyOptions;
+    this.onTaskChange = onTaskChange;
+    this.modalEl.addClass("gantt-builder-details-modal");
+  }
+
+  onOpen(): void {
+    this.titleEl.setText(this.task.name || t("unnamedTask"));
+    this.contentEl.empty();
+
+    const cardEl = this.contentEl.createDiv("gantt-builder-details-card");
+
+    const statusEl = cardEl.createDiv("gantt-builder-details-status");
+    this.createFlagToggle(statusEl, t("done"), this.task.completed, async (value) => {
+      this.task.completed = value;
+      await this.onTaskChange();
+    });
+    this.createFlagToggle(statusEl, t("milestone"), this.task.isMilestone, async (value) => {
+      this.task.isMilestone = value;
+      await this.onTaskChange();
+    });
+    this.createFlagToggle(statusEl, t("critical"), this.task.isHighPriority, async (value) => {
+      this.task.isHighPriority = value;
+      await this.onTaskChange();
+    });
+
+    const dateGridEl = cardEl.createDiv("gantt-builder-details-grid");
+    const startInput = this.createDateField(dateGridEl, t("from"), this.task.startDate);
+    const dueInput = this.createDateField(dateGridEl, t("to"), this.task.dueDate);
+    const conflictEl = cardEl.createDiv("gantt-builder-date-conflict");
+
+    const updateConflict = () => {
+      const hasConflict = Boolean(this.task.startDate && this.task.dueDate && new Date(this.task.startDate) > new Date(this.task.dueDate));
+      conflictEl.setText(hasConflict ? t("dateConflict") : "");
+    };
+    updateConflict();
+
+    startInput.onchange = async () => {
+      this.task.startDate = startInput.value.trim();
+      updateConflict();
+      await this.onTaskChange();
+    };
+    dueInput.onchange = async () => {
+      this.task.dueDate = dueInput.value.trim();
+      updateConflict();
+      await this.onTaskChange();
+    };
+
+    const idRowEl = cardEl.createDiv("gantt-builder-details-id-row");
+    const idWrapEl = idRowEl.createDiv("gantt-builder-details-field");
+    idWrapEl.createEl("label", { text: "ID" });
+    const idInput = idWrapEl.createEl("input", { type: "text", value: this.task.id, placeholder: t("optional") });
+    idInput.onchange = async () => {
+      this.task.id = idInput.value.trim();
+      await this.onTaskChange();
+    };
+    const randomButton = idRowEl.createEl("button", {
+      text: "🎲",
+      attr: { title: t("randomIdTitle"), "aria-label": t("randomIdTitle") },
+    });
+    randomButton.onclick = async () => {
+      this.task.id = `task-${Math.random().toString(36).slice(2, 8)}`;
+      idInput.value = this.task.id;
+      await this.onTaskChange();
+    };
+
+    const dependencyFieldEl = cardEl.createDiv("gantt-builder-details-field");
+    dependencyFieldEl.createEl("label", { text: t("dependency") });
+    const dependencySelect = dependencyFieldEl.createEl("select");
+    dependencySelect.createEl("option", { value: "", text: t("noDependency") });
+    for (const option of this.dependencyOptions) {
+      dependencySelect.createEl("option", { value: option.value, text: option.label });
+    }
+    dependencySelect.value = this.task.dependency || "";
+    dependencySelect.onchange = async () => {
+      this.task.dependency = dependencySelect.value;
+      await this.onTaskChange();
+    };
+  }
+
+  private createFlagToggle(parentEl: HTMLElement, labelText: string, checked: boolean, onChange: (value: boolean) => Promise<void>): void {
+    const labelEl = parentEl.createEl("label");
+    const inputEl = labelEl.createEl("input", { attr: { type: "checkbox" } });
+    inputEl.checked = checked;
+    inputEl.onchange = async () => {
+      await onChange(inputEl.checked);
+    };
+    labelEl.appendText(labelText);
+  }
+
+  private createDateField(parentEl: HTMLElement, labelText: string, value: string): HTMLInputElement {
+    const fieldEl = parentEl.createDiv("gantt-builder-details-field");
+    fieldEl.createEl("label", { text: labelText });
+    return fieldEl.createEl("input", { type: "date", value });
+  }
+}
+
 class GanttBuilderEditor {
   private readonly app: App;
   private readonly file: TFile;
@@ -76,8 +181,6 @@ class GanttBuilderEditor {
   private tasks: Task[] = [];
   private chartTitle = DEFAULT_CHART_TITLE;
   private insertMode: InsertMode;
-  private readonly ganttTargetHeading: string;
-  private readonly taskTargetHeading: string;
   private draggingTaskId: string | null = null;
 
   private readonly tableWrapEl: HTMLDivElement;
@@ -90,7 +193,7 @@ class GanttBuilderEditor {
     app: App,
     file: TFile,
     rootEl: HTMLElement,
-    settings: Pick<GanttBuilderSettings, "excludeWeekends" | "insertMode" | "ganttTargetHeading" | "taskTargetHeading">,
+    settings: Pick<GanttBuilderSettings, "excludeWeekends" | "insertMode">,
     onSettingsChange: (
       update: Partial<Pick<GanttBuilderSettings, "excludeWeekends" | "insertMode">>,
     ) => Promise<void>,
@@ -100,28 +203,11 @@ class GanttBuilderEditor {
     this.rootEl = rootEl;
     this.config = { excludeWeekends: settings.excludeWeekends };
     this.insertMode = settings.insertMode;
-    this.ganttTargetHeading = settings.ganttTargetHeading;
-    this.taskTargetHeading = settings.taskTargetHeading;
     this.onSettingsChange = onSettingsChange;
     this.previewComponent = new Component();
     this.previewComponent.load();
 
     const toolbarEl = this.rootEl.createDiv("gantt-builder-toolbar");
-
-    const titleWrapEl = toolbarEl.createDiv("gantt-builder-title-wrap");
-    titleWrapEl.createEl("label", { text: t("chartTitleLabel") });
-    this.titleInputEl = titleWrapEl.createEl("input", {
-      type: "text",
-      placeholder: t("optional"),
-      value: this.chartTitle,
-    });
-    this.titleInputEl.onchange = async () => {
-      this.chartTitle = this.titleInputEl.value.trim();
-      this.titleInputEl.value = this.chartTitle;
-      await this.refreshPreview();
-    };
-    titleWrapEl.createEl("small", { text: t("chartTitleHint") });
-
     const topButtonsEl = toolbarEl.createDiv("gantt-builder-button-row");
 
     const reloadButton = topButtonsEl.createEl("button", { text: t("reloadFromNote") });
@@ -179,6 +265,31 @@ class GanttBuilderEditor {
     previewTabButton.onclick = () => this.switchTab("preview", previewTabButton, codeTabButton);
     codeTabButton.onclick = () => this.switchTab("code", previewTabButton, codeTabButton);
 
+    const previewOptionsEl = tabsEl.createDiv("gantt-builder-preview-options");
+    const titleWrapEl = previewOptionsEl.createDiv("gantt-builder-title-wrap");
+    titleWrapEl.createEl("label", { text: t("chartTitleLabel"), attr: { title: t("chartTitleHint") } });
+    this.titleInputEl = titleWrapEl.createEl("input", {
+      type: "text",
+      placeholder: t("optional"),
+      value: this.chartTitle,
+      attr: { title: t("chartTitleHint") },
+    });
+    this.titleInputEl.onchange = async () => {
+      this.chartTitle = this.titleInputEl.value.trim();
+      this.titleInputEl.value = this.chartTitle;
+      await this.refreshPreview();
+    };
+
+    const excludeWeekendsLabel = previewOptionsEl.createEl("label", { attr: { title: t("excludeWeekendsDesc") } });
+    const excludeWeekendsToggle = excludeWeekendsLabel.createEl("input", { attr: { type: "checkbox" } });
+    excludeWeekendsToggle.checked = this.config.excludeWeekends;
+    excludeWeekendsToggle.onchange = async () => {
+      this.config.excludeWeekends = excludeWeekendsToggle.checked;
+      await this.onSettingsChange({ excludeWeekends: this.config.excludeWeekends });
+      await this.refreshPreview();
+    };
+    excludeWeekendsLabel.appendText(t("excludeWeekends"));
+
     this.previewPaneEl = viewerWrapEl.createDiv("gantt-builder-preview");
     this.codePaneEl = viewerWrapEl.createDiv("gantt-builder-code-pane");
     this.codePaneEl.addClass("is-hidden");
@@ -186,34 +297,6 @@ class GanttBuilderEditor {
       cls: "gantt-builder-code",
       attr: { readonly: "true" },
     });
-
-    const bottomSettingsEl = this.rootEl.createDiv("gantt-builder-toolbar gantt-builder-bottom-settings");
-    new Setting(bottomSettingsEl)
-      .setName(t("excludeWeekends"))
-      .setDesc(t("excludeWeekendsDesc"))
-      .addToggle((toggle) =>
-        toggle.setValue(this.config.excludeWeekends).onChange(async (value) => {
-          this.config.excludeWeekends = value;
-          await this.onSettingsChange({ excludeWeekends: value });
-          await this.refreshPreview();
-        }),
-      );
-
-    new Setting(bottomSettingsEl)
-      .setName(t("writePosition"))
-      .setDesc(t("writePositionDesc"))
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("cursor", t("optionCursor"))
-          .addOption("bottom", t("optionBottom"))
-          .addOption("heading", t("optionHeading"))
-          .setValue(this.insertMode)
-          .onChange(async (value) => {
-            this.insertMode = value as InsertMode;
-            await this.onSettingsChange({ insertMode: this.insertMode });
-            await this.refreshPreview();
-          }),
-      );
   }
 
   async initialize(): Promise<void> {
@@ -236,10 +319,6 @@ class GanttBuilderEditor {
 
   private updateTitleInputAvailability(): void {
     this.titleInputEl.disabled = false;
-  }
-
-  private isValidHeadingPattern(heading: string): boolean {
-    return /^(#{1,6})\s+\S.+$/.test(heading.trim());
   }
 
   private getEffectiveChartTitle(): string {
@@ -305,9 +384,7 @@ class GanttBuilderEditor {
     const table = this.tableWrapEl.createEl("table", { cls: "gantt-builder-table" });
     const head = table.createTHead();
     const headerRow = head.insertRow();
-    [t("headerAction"), t("headerGroup"), t("headerTask"), t("headerDate"), t("headerIdDependency")].forEach((title) =>
-      headerRow.createEl("th", { text: title }),
-    );
+    [t("headerAction"), t("headerGroup"), t("headerTask")].forEach((title) => headerRow.createEl("th", { text: title }));
 
     const body = table.createTBody();
     for (const task of this.tasks) {
@@ -338,6 +415,7 @@ class GanttBuilderEditor {
       const actionCell = row.insertCell();
       const actionStack = actionCell.createDiv("gantt-builder-action-stack");
       const addButton = actionStack.createEl("button", { text: "+", attr: { title: t("addInCurrentGroup") } });
+      const editButton = actionStack.createEl("button", { text: "✎", attr: { title: t("editTaskDetails"), "aria-label": t("editTaskDetails") } });
       const removeButton = actionStack.createEl("button", { text: "-", cls: "mod-warning", attr: { title: t("deleteTask") } });
       addButton.onclick = async () => {
         const index = this.tasks.findIndex((item) => item.internalId === task.internalId);
@@ -345,6 +423,7 @@ class GanttBuilderEditor {
         this.renderTaskTable();
         await this.refreshPreview();
       };
+      editButton.onclick = () => this.openTaskDetailsModal(task);
       removeButton.onclick = async () => {
         this.tasks = this.tasks.filter((item) => item.internalId !== task.internalId);
         if (!this.tasks.length) {
@@ -355,9 +434,10 @@ class GanttBuilderEditor {
       };
 
       const sectionCell = row.insertCell();
-      const sectionInput = sectionCell.createEl("textarea", {
+      const sectionInput = sectionCell.createEl("input", {
+        type: "text",
         cls: "gantt-builder-group-input",
-        attr: { rows: "2", placeholder: t("groupPlaceholder") },
+        placeholder: t("groupPlaceholder"),
       });
       sectionInput.value = task.section;
       sectionInput.onchange = async () => {
@@ -367,97 +447,26 @@ class GanttBuilderEditor {
 
       const taskCell = row.insertCell();
       const taskMainCell = taskCell.createDiv("gantt-builder-task-main-cell");
-      const taskInput = taskMainCell.createEl("input", { type: "text", value: task.name, placeholder: t("taskNamePlaceholder") });
+      const taskInput = taskMainCell.createEl("textarea", {
+        cls: "gantt-builder-task-input",
+        attr: { rows: "1", placeholder: t("taskNamePlaceholder") },
+      });
+      taskInput.value = task.name;
       taskInput.onchange = async () => {
         task.name = taskInput.value.trim();
         await this.refreshPreview();
       };
-
-      const statusRow = taskMainCell.createDiv("gantt-builder-status-inline");
-      const doneLabel = statusRow.createEl("label");
-      const doneToggle = doneLabel.createEl("input", { attr: { type: "checkbox" } });
-      doneToggle.checked = task.completed;
-      doneToggle.onchange = async () => {
-        task.completed = doneToggle.checked;
-        await this.refreshPreview();
-      };
-      doneLabel.appendText(t("done"));
-
-      const milestoneLabel = statusRow.createEl("label");
-      const milestoneToggle = milestoneLabel.createEl("input", { attr: { type: "checkbox" } });
-      milestoneToggle.checked = task.isMilestone;
-      milestoneToggle.onchange = async () => {
-        task.isMilestone = milestoneToggle.checked;
-        await this.refreshPreview();
-      };
-      milestoneLabel.appendText(t("milestone"));
-
-      const criticalLabel = statusRow.createEl("label");
-      const criticalToggle = criticalLabel.createEl("input", { attr: { type: "checkbox" } });
-      criticalToggle.checked = task.isHighPriority;
-      criticalToggle.onchange = async () => {
-        task.isHighPriority = criticalToggle.checked;
-        await this.refreshPreview();
-      };
-      criticalLabel.appendText(t("critical"));
-
-      const dateCell = row.insertCell();
-      const dateStack = dateCell.createDiv("gantt-builder-date-stack");
-      const startRow = dateStack.createDiv("gantt-builder-inline-field");
-      startRow.createEl("span", { cls: "gantt-builder-inline-label", text: t("from") });
-      const startInput = startRow.createEl("input", { type: "date", value: task.startDate });
-      startInput.onchange = async () => {
-        task.startDate = startInput.value.trim();
-        this.renderTaskTable();
-        await this.refreshPreview();
-      };
-      const dueRow = dateStack.createDiv("gantt-builder-inline-field");
-      dueRow.createEl("span", { cls: "gantt-builder-inline-label", text: t("to") });
-      const dueInput = dueRow.createEl("input", { type: "date", value: task.dueDate });
-      dueInput.onchange = async () => {
-        task.dueDate = dueInput.value.trim();
-        this.renderTaskTable();
-        await this.refreshPreview();
-      };
       if (this.hasDateConflict(task)) {
         row.classList.add("gantt-builder-row-conflict");
-        dateStack.createDiv("gantt-builder-date-conflict").setText(t("dateConflict"));
       }
-
-      const relationCell = row.insertCell();
-      const relationStack = relationCell.createDiv("gantt-builder-relation-stack");
-      const idWrap = relationStack.createDiv("gantt-builder-id-cell gantt-builder-inline-field");
-      idWrap.createEl("span", { cls: "gantt-builder-inline-label", text: "ID" });
-      const idInput = idWrap.createEl("input", { type: "text", value: task.id, placeholder: t("optional") });
-      idInput.onchange = async () => {
-        task.id = idInput.value.trim();
-        this.renderTaskTable();
-        await this.refreshPreview();
-      };
-      const randomButton = idWrap.createEl("button", {
-        text: "🎲",
-        attr: { title: t("randomIdTitle"), "aria-label": t("randomIdTitle") },
-      });
-      randomButton.onclick = async () => {
-        task.id = this.generateRandomTaskId();
-        this.renderTaskTable();
-        await this.refreshPreview();
-      };
-
-      const depWrap = relationStack.createDiv("gantt-builder-inline-field");
-      depWrap.createEl("span", { cls: "gantt-builder-inline-label", text: t("dependency") });
-      const dependencySelect = depWrap.createEl("select");
-      dependencySelect.addClass("gantt-builder-dependency-select");
-      dependencySelect.createEl("option", { value: "", text: t("noDependency") });
-      for (const option of this.getDependencyOptions(task)) {
-        dependencySelect.createEl("option", { value: option.value, text: option.label });
-      }
-      dependencySelect.value = task.dependency || "";
-      dependencySelect.onchange = async () => {
-        task.dependency = dependencySelect.value;
-        await this.refreshPreview();
-      };
     }
+  }
+
+  private openTaskDetailsModal(task: Task): void {
+    new TaskDetailsModal(this.app, task, this.getDependencyOptions(task), async () => {
+      this.renderTaskTable();
+      await this.refreshPreview();
+    }).open();
   }
 
   private getCursorOffsetForCurrentFile(): number | undefined {
@@ -572,10 +581,6 @@ class GanttBuilderEditor {
   }
 
   private async saveTasksToNote(): Promise<void> {
-    if (this.insertMode === "heading" && !this.isValidHeadingPattern(this.taskTargetHeading)) {
-      new Notice(t("invalidTaskHeading"));
-      return;
-    }
     const content = await this.app.vault.read(this.file);
     const cursorOffset = this.getCursorOffsetForCurrentFile();
     const mode = this.insertMode === "cursor" && cursorOffset === undefined ? "bottom" : this.insertMode;
@@ -584,7 +589,6 @@ class GanttBuilderEditor {
     }
     const next = upsertTaskScope(content, this.tasks, {
       mode,
-      headingText: this.taskTargetHeading,
       cursorOffset,
     });
     await this.app.vault.modify(this.file, next);
@@ -592,10 +596,6 @@ class GanttBuilderEditor {
   }
 
   private async saveGanttToNote(): Promise<void> {
-    if (this.insertMode === "heading" && !this.isValidHeadingPattern(this.ganttTargetHeading)) {
-      new Notice(t("invalidGanttHeading"));
-      return;
-    }
     const content = await this.app.vault.read(this.file);
     const effectiveTitle = this.getEffectiveChartTitle();
     const mermaidCode = generateMermaidCode(this.tasks, this.config, effectiveTitle);
@@ -606,9 +606,8 @@ class GanttBuilderEditor {
     }
     const next = upsertGanttArtifacts(content, mermaidCode, this.tasks, effectiveTitle, {
       mode,
-      headingText: this.ganttTargetHeading,
       cursorOffset,
-      useCustomTitle: this.insertMode !== "heading",
+      useCustomTitle: true,
     });
     await this.app.vault.modify(this.file, next);
     new Notice(t("ganttWritten"));
@@ -637,8 +636,6 @@ class GanttBuilderModal extends Modal {
       {
         excludeWeekends: this.plugin.settings.excludeWeekends,
         insertMode: this.plugin.settings.insertMode,
-        ganttTargetHeading: this.plugin.settings.ganttTargetHeading,
-        taskTargetHeading: this.plugin.settings.taskTargetHeading,
       },
       async (update) => {
         Object.assign(this.plugin.settings, update);
@@ -743,8 +740,6 @@ class GanttBuilderWorkspaceView extends ItemView {
       {
         excludeWeekends: this.plugin.settings.excludeWeekends,
         insertMode: this.plugin.settings.insertMode,
-        ganttTargetHeading: this.plugin.settings.ganttTargetHeading,
-        taskTargetHeading: this.plugin.settings.taskTargetHeading,
       },
       async (update) => {
         Object.assign(this.plugin.settings, update);
@@ -792,18 +787,10 @@ export default class ObsidianGanttBuilderPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const loaded = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()) as GanttBuilderSettings & { targetHeading?: string };
-    if (!loaded.ganttTargetHeading && loaded.targetHeading) {
-      loaded.ganttTargetHeading = loaded.targetHeading;
-    }
-    if (!loaded.taskTargetHeading && loaded.targetHeading) {
-      loaded.taskTargetHeading = loaded.targetHeading;
-    }
-    if (loaded.ganttTargetHeading && !/^\s*#{1,6}\s+/.test(loaded.ganttTargetHeading)) {
-      loaded.ganttTargetHeading = `## ${loaded.ganttTargetHeading.trim()}`;
-    }
-    if (loaded.taskTargetHeading && !/^\s*#{1,6}\s+/.test(loaded.taskTargetHeading)) {
-      loaded.taskTargetHeading = `## ${loaded.taskTargetHeading.trim()}`;
+    const legacyData = (await this.loadData()) as Omit<Partial<GanttBuilderSettings>, "insertMode"> & { insertMode?: string };
+    const loaded = Object.assign({}, DEFAULT_SETTINGS, legacyData) as GanttBuilderSettings;
+    if (legacyData.insertMode === "heading") {
+      loaded.insertMode = DEFAULT_SETTINGS.insertMode;
     }
     this.settings = loaded;
   }
@@ -884,42 +871,11 @@ class GanttBuilderSettingTab extends PluginSettingTab {
         dropdown
           .addOption("cursor", t("optionCursor"))
           .addOption("bottom", t("optionBottom"))
-          .addOption("heading", t("optionHeading"))
           .setValue(this.plugin.settings.insertMode)
           .onChange(async (value) => {
             this.plugin.settings.insertMode = value as InsertMode;
             await this.plugin.saveSettings();
           }),
-      );
-
-    new Setting(containerEl)
-      .setName(t("settingGanttDefaultHeading"))
-      .setDesc(t("settingHeadingDesc"))
-      .addText((text) =>
-        text.setValue(this.plugin.settings.ganttTargetHeading).onChange(async (value) => {
-          const next = value.trim();
-          if (next && !/^(#{1,6})\s+\S.+$/.test(next)) {
-            new Notice(t("headingFormatError"));
-            return;
-          }
-          this.plugin.settings.ganttTargetHeading = next;
-          await this.plugin.saveSettings();
-        }),
-      );
-
-    new Setting(containerEl)
-      .setName(t("settingTaskDefaultHeading"))
-      .setDesc(t("settingHeadingDesc"))
-      .addText((text) =>
-        text.setValue(this.plugin.settings.taskTargetHeading).onChange(async (value) => {
-          const next = value.trim();
-          if (next && !/^(#{1,6})\s+\S.+$/.test(next)) {
-            new Notice(t("headingFormatError"));
-            return;
-          }
-          this.plugin.settings.taskTargetHeading = next;
-          await this.plugin.saveSettings();
-        }),
       );
   }
 }
