@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-13
+
+### Added
+- **Task Details Modal**: new modal dialog for editing task properties in a dedicated view.
+  - Status toggles: done, milestone, critical.
+  - Date fields with start/due conflict detection.
+  - Task ID field with random ID generator.
+  - Dependency selection dropdown from other tasks.
+- Preview options area next to preview/code tabs, grouping chart title input and exclude-weekends toggle.
+
+### Changed
+- **Major task table redesign**: simplified from 5 columns to 3 (Action, Group, Task).
+- Task name input changed from single-line input to auto-resizing textarea.
+- Group/section input changed from textarea to single-line text input.
+- Chart title and exclude-weekends toggle moved from toolbar/bottom area to preview options.
+- Bottom settings toolbar removed from editor view.
+- Write position dropdown removed from editor (still available in plugin settings).
+
+### Removed
+- Heading-based insert mode ("below specific heading") and all related settings (`ganttTargetHeading`, `taskTargetHeading`).
+- Inline status toggles, date fields, ID, and dependency inputs from task table rows.
+- Date and ID/Dependency columns from task table.
+- Heading-related settings from plugin settings tab.
+- Legacy heading migration code from settings loader (heading mode now falls back to bottom).
+
 ## [0.1.10] - 2026-04-06
 
 ### Added
